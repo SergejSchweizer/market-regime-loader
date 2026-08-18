@@ -24,14 +24,16 @@ Last updated: 2026-08-18
 - Dates are stored as `Date`; timestamps are stored as timezone-aware UTC timestamps.
 - Missing observations are never synthesized in Bronze or Silver.
 - Gold features must be causal: a feature for date `t` may use observations dated `<= t` only.
+- Published Gold builds are immutable and identified by `build_id`; an existing completed build directory must never be overwritten in place.
+- `lake/gold/dataset=regime_features_daily/manifest.parquet` is the only authoritative publication pointer. Consumers must never infer the current build from directory order, file modification time, or lexicographic filename discovery alone.
 - Provider limitations must be explicit. "Maximum history" means the maximum history made available by the selected open/public source, not paid history that the source no longer exposes.
 
 ## Parallel-Agent Rules
 
 Two weak agents are expected to work in parallel.
 
-- **Agent A lane:** lake contracts, CBOE/STOXX/Yahoo volatility sources, Silver normalization, volatility Gold features.
-- **Agent B lane:** Parquet IO, ECB/FRED macro sources, coverage/inventory, macro Gold features.
+- **Agent A lane:** lake contracts, CBOE/STOXX/Yahoo volatility sources, Silver normalization, volatility Gold features, Gold version storage.
+- **Agent B lane:** Parquet IO, ECB/FRED macro sources, coverage/inventory, macro Gold features, Gold manifest contract.
 - A PR may start only after every item in its `Depends on` field is merged.
 - Independent lane PRs should branch from the same dependency-complete `main` and may proceed in parallel.
 - If another PR modifies the same file, the later PR must rebase on current `main` before implementation; weak agents must not resolve broad semantic conflicts by guessing.
@@ -79,9 +81,10 @@ lake/
 
   gold/
     dataset=regime_features_daily/
-      year=<YYYY>/
-        month=<MM>/
+      versions/
+        build_id=<YYYYMMDDTHHMMSSZ>/
           data.parquet
+      manifest.parquet
 
   state/
     ingestion_state.parquet
@@ -91,7 +94,7 @@ lake/
     dataset_inventory.parquet
 ```
 
-Monthly partitions are intentional. Unlike minute/tick crypto history, these daily series are too small for one-Parquet-file-per-day storage.
+Monthly partitions are intentional for Bronze and Silver. Gold is much smaller and each successful Gold build is a complete immutable snapshot stored as one `data.parquet` file under its build ID.
 
 ### Bronze contract
 
@@ -162,6 +165,35 @@ USD broad-index trailing change
 
 Gold must not create `risk_on`, `risk_off`, HMM states, portfolio weights, trading signals, labels, or targets.
 
+A Gold build is not considered published merely because `versions/build_id=.../data.parquet` exists. Publication is controlled only through the dataset-local `manifest.parquet`.
+
+### Gold manifest contract
+
+The planned dataset-local manifest contains one row per attempted Gold build with at least:
+
+```text
+dataset_id: String
+build_id: String
+status: String              # building | complete | failed
+current: Boolean
+started_at_utc: Datetime[UTC]
+completed_at_utc: Datetime[UTC] nullable
+schema_version: Int64
+feature_version: Int64
+min_date: Date nullable
+max_date: Date nullable
+row_count: Int64 nullable
+data_path: String nullable
+```
+
+Publication invariants:
+
+- only a `complete` build may have `current=true`;
+- exactly one retained build is `current=true` after the first successful publication;
+- a failed or incomplete build never replaces the previous current build;
+- consumers select from `manifest.parquet`, never from filesystem recency;
+- a consumer that cannot read the current schema/feature version may fall back to the newest `complete` build it supports, ordered by `completed_at_utc` and then `build_id` descending.
+
 ## Incremental Update Contract
 
 For each series:
@@ -202,6 +234,18 @@ PR-01 repository bootstrap
                  PR-14 volatility Gold             PR-15 macro Gold
                            \                               /
                             +---------- PR-16 ------------+
+                                   Gold assembly
+                                      /      \
+                                     /        \
+                  PR-17 version storage      PR-18 manifest contract
+                           \                    /
+                            +------ PR-19 -----+
+                              atomic publish
+                                    |
+                                  PR-20
+                              Gold retention
+                                    |
+                         PR-13 -----+----- PR-21
                                       daily pipeline
 ```
 
@@ -228,14 +272,14 @@ Description:
 - R2: Create package roots `application/`, `ingestion/`, `api/`, `scripts/`, and `tests/`, each with only the minimal files required for imports and future work.
 - R3: Add `.gitignore` rules that ignore `.venv/`, Python caches, test caches, coverage outputs, and the entire `lake/` directory.
 - R4: Add `Makefile` targets `format-check`, `lint`, `typecheck`, `test`, and `check`, where `check` runs all four validation classes without downloading market data.
-- R5: Add a minimal `README.md` that states the repository purpose, Polars/Parquet constraint, Bronze/Silver/Gold layout, and that the loader is reusable by multiple consumer projects.
+- R5: Keep the pre-existing `README.md` and `ARCHITECTURE.md` documentation sidecars consistent with the bootstrapped package/tooling structure rather than replacing or recreating them.
 
 Acceptance:
 - A1 (verifies R1): `uv sync --extra dev` resolves an environment containing exactly the stated runtime/tooling families and no pandas production dependency.
 - A2 (verifies R2): imports from `application`, `ingestion`, and `api` succeed and the five required top-level code/test directories exist.
 - A3 (verifies R3): `lake/` and the listed local/cache artifacts are ignored by Git and no lake data is tracked.
 - A4 (verifies R4): `make check` executes formatting check, lint, mypy, and pytest without any network call.
-- A5 (verifies R5): README contains the stated purpose, engine/storage constraints, medallion layers, and multi-project reuse statement.
+- A5 (verifies R5): both sidecars remain present and describe the package/tooling structure implemented by this PR without contradicting `main`.
 
 ## PR-02: Define Series Registry And Medallion Path Contracts
 
@@ -255,15 +299,15 @@ Commit: `feat: define series and lake contracts`
 
 Description:
 - R1: Add a typed immutable registry containing exactly the 13 initial canonical series IDs from this backlog with provider, source ID/file, unit, native shape (`ohlc` or `scalar`), frequency, and bootstrap strategy.
-- R2: Add typed helpers that return Bronze, Silver, Gold, state, and manifest paths using the exact monthly partition layout documented in this backlog.
+- R2: Add typed helpers for Bronze/Silver monthly paths, the Gold dataset root, `versions/build_id=<build_id>/data.parquet`, the dataset-local Gold `manifest.parquet`, state paths, and operational manifest paths exactly as documented in this backlog.
 - R3: Add validation that rejects duplicate canonical series IDs, unsupported native shapes, empty source IDs, and unknown providers at application startup.
-- R4: Add focused tests covering every registered series and exact example partition paths for `2026-08-18`.
+- R4: Add focused tests covering every registered series and exact example paths for observation date `2026-08-18` and Gold build ID `20260818T020000Z`.
 
 Acceptance:
 - A1 (verifies R1): the registry contains exactly the 13 documented series and exposes all stated metadata fields with no additional series.
-- A2 (verifies R2): path helpers produce the documented `provider=.../series=.../year=YYYY/month=MM/data.parquet` Bronze layout and corresponding Silver/Gold/state/manifest paths.
+- A2 (verifies R2): path helpers produce the documented Bronze/Silver monthly paths plus `lake/gold/dataset=regime_features_daily/versions/build_id=20260818T020000Z/data.parquet` and `lake/gold/dataset=regime_features_daily/manifest.parquet` exactly.
 - A3 (verifies R3): invalid duplicate IDs, native shapes, source IDs, and providers fail deterministically before ingestion begins.
-- A4 (verifies R4): tests assert the complete registry inventory and exact path strings for a fixed 2026-08-18 date.
+- A4 (verifies R4): tests assert the complete registry inventory and exact fixed-date/build path strings.
 
 ## PR-03: Implement Polars Parquet Lake Merge And Read Utilities
 
@@ -649,7 +693,7 @@ Acceptance:
 - A4 (verifies R4): missing/insufficient-history rows remain null and no forward/back fill or future observation is used.
 - A5 (verifies R5): all stated macro feature and leakage tests pass.
 
-## PR-16: Assemble Daily Gold Dataset And Daily Update Command
+## PR-16: Assemble Canonical Daily Gold Dataset
 
 Status: Planned
 
@@ -657,33 +701,183 @@ Updated: 2026-08-18
 
 PR: none
 
-Branch: `codex/pr16-daily-medallion-pipeline`
+Branch: `codex/pr16-assemble-daily-gold`
 
 Agent lane: Integration; assign one agent only
 
-Depends on: PR-13, PR-14, PR-15
+Depends on: PR-14, PR-15
+
+Commit: `feat: assemble daily gold dataset`
+
+Description:
+- R1: Assemble the logical `regime_features_daily` dataset by outer-joining the volatility and macro Gold feature families on `observation_date`, with exactly one sorted row per union date and no value imputation.
+- R2: Define one deterministic ordered Gold schema containing `observation_date` followed by the complete PR-14 and PR-15 feature columns; duplicate column names or duplicate dates are rejected.
+- R3: Validate that the assembled frame is non-empty, `observation_date` is strictly increasing and unique, all feature columns have numeric-or-null values, and no feature uses a date later than its output row.
+- R4: Keep this PR storage-neutral: it returns/validates the canonical Gold frame but does not choose `build_id`, write a version directory, mutate `manifest.parquet`, or implement retention.
+- R5: Add focused tests for outer-join null preservation, stable column order, duplicate rejection, chronological ordering, and storage-neutral behavior.
+
+Acceptance:
+- A1 (verifies R1): fixture output contains one row for every union date, both feature families, and nulls where one family is absent.
+- A2 (verifies R2): tests assert the exact deterministic Gold column order and reject duplicate columns/dates.
+- A3 (verifies R3): invalid empty, unsorted, duplicate-date, non-numeric-feature, and future-leakage fixtures fail deterministic validation.
+- A4 (verifies R4): the Gold assembly module contains no build-ID generation, filesystem version publication, manifest mutation, or retention call.
+- A5 (verifies R5): all five stated assembly behaviors have focused passing tests.
+
+## PR-17: Add Immutable Versioned Gold Storage
+
+Status: Planned
+
+Updated: 2026-08-18
+
+PR: none
+
+Branch: `codex/pr17-versioned-gold-storage`
+
+Agent lane: Agent A
+
+Depends on: PR-16
+
+Commit: `feat: add immutable gold build storage`
+
+Description:
+- R1: Define `build_id` as an injected/derived UTC identifier formatted exactly `YYYYMMDDTHHMMSSZ`; validation rejects any build ID that does not match this format.
+- R2: Write one complete canonical Gold frame to exactly `lake/gold/dataset=regime_features_daily/versions/build_id=<build_id>/data.parquet` using Polars and an atomic temporary-file replacement inside the new build directory.
+- R3: Treat a completed build path as immutable: if `data.parquet` already exists for the same build ID, the writer must fail rather than overwrite or merge it.
+- R4: Allow multiple build IDs to coexist and provide a reader that loads one explicitly requested build ID without consulting file modification times or selecting another directory implicitly.
+- R5: Add tests for build-ID validation, exact path, atomic write, same-build overwrite rejection, and coexistence/readback of two builds.
+
+Acceptance:
+- A1 (verifies R1): fixed injected timestamps produce exact IDs such as `20260818T020000Z`, and malformed IDs are rejected.
+- A2 (verifies R2): a successful write creates exactly the documented `versions/build_id=.../data.parquet` artifact with deterministic logical rows.
+- A3 (verifies R3): a second write to an existing completed build ID fails and leaves the first Parquet file byte/logically unchanged.
+- A4 (verifies R4): two build directories coexist and an explicit read of build A never returns build B because of recency or directory ordering.
+- A5 (verifies R5): all five stated storage/versioning cases have focused passing tests.
+
+## PR-18: Add Gold Manifest Contract And Consumer Selection Semantics
+
+Status: Planned
+
+Updated: 2026-08-18
+
+PR: none
+
+Branch: `codex/pr18-gold-manifest-contract`
+
+Agent lane: Agent B
+
+Depends on: PR-16
+
+Commit: `feat: add gold manifest contract`
+
+Description:
+- R1: Define the dataset-local manifest schema with exactly the required fields documented above: `dataset_id`, `build_id`, `status`, `current`, `started_at_utc`, `completed_at_utc`, `schema_version`, `feature_version`, `min_date`, `max_date`, `row_count`, and `data_path`.
+- R2: Persist the manifest only at `lake/gold/dataset=regime_features_daily/manifest.parquet` using atomic Parquet replacement and deterministic ordering by `started_at_utc`, then `build_id`.
+- R3: Validate manifest rows so `status` is only `building`, `complete`, or `failed`; only `complete` may be current; build IDs are unique; and at most one row is current before first publication/exactly one after a successful publication.
+- R4: Document the consumer resolution rule: prefer `status=complete AND current=true` when compatible; otherwise select the newest compatible `complete` row by `completed_at_utc DESC, build_id DESC`; never select `building` or `failed`.
+- R5: Add tests for manifest round-trip, invalid status/current combinations, duplicate build IDs, deterministic ordering, and the current/latest-compatible selection examples.
+
+Acceptance:
+- A1 (verifies R1): manifest fixtures expose exactly the twelve documented fields with stable types and no hidden filesystem-recency field.
+- A2 (verifies R2): one atomic manifest file exists at the exact dataset-local path and repeated writes produce deterministic row ordering.
+- A3 (verifies R3): invalid statuses, current non-complete rows, duplicate build IDs, and multiple-current manifests are rejected; a pre-publication manifest may have zero current rows.
+- A4 (verifies R4): documentation and test fixtures select the current compatible build first and fall back only to the newest compatible complete build when current is incompatible.
+- A5 (verifies R5): all five stated manifest/selection cases have focused passing tests.
+
+## PR-19: Publish Gold Builds Atomically Through Manifest
+
+Status: Planned
+
+Updated: 2026-08-18
+
+PR: none
+
+Branch: `codex/pr19-atomic-gold-publication`
+
+Agent lane: Integration; assign one agent only
+
+Depends on: PR-17, PR-18
+
+Commit: `feat: publish gold builds atomically`
+
+Description:
+- R1: Implement a Gold publication service that first records the new build as `building,current=false`, writes the immutable versioned `data.parquet`, and validates its schema/date uniqueness/row count before it can become current.
+- R2: On successful validation, atomically replace `manifest.parquet` so the new row becomes `status=complete,current=true`, its completion/coverage/count/path fields are populated, and the previously current row becomes `current=false` in the same manifest write.
+- R3: On build/write/validation failure, atomically mark the attempted row `status=failed,current=false` when possible and leave the previously current complete build unchanged.
+- R4: Guarantee that a consumer reading a valid manifest never observes two current builds and never needs to inspect a partially written version directory to determine publication state.
+- R5: Add failure-injection tests at pre-write, post-write/pre-validation, and manifest-switch stages plus a successful current-switch test.
+
+Acceptance:
+- A1 (verifies R1): a publication attempt creates a building row before data publication and cannot promote an unvalidated Parquet artifact.
+- A2 (verifies R2): successful publication performs one final atomic manifest switch with exactly one current complete row and accurate build metadata/path.
+- A3 (verifies R3): every simulated failure leaves the old current row current and the attempted build non-current/failed rather than exposing it as published.
+- A4 (verifies R4): concurrent-state fixtures never produce a valid manifest with two current rows, and consumer selection requires only manifest state plus the selected row's `data_path`.
+- A5 (verifies R5): all three failure points and the successful switch scenario have passing tests.
+
+## PR-20: Add Gold Build Retention Policy
+
+Status: Planned
+
+Updated: 2026-08-18
+
+PR: none
+
+Branch: `codex/pr20-gold-retention`
+
+Agent lane: Foundation; assign the first free agent
+
+Depends on: PR-19
+
+Commit: `feat: retain recent gold builds`
+
+Description:
+- R1: Add configuration `gold_retention_successful_builds` with default `5`, interpreted as five retained `complete` builds including the current build for each `(schema_version, feature_version)` pair.
+- R2: After a successful publication, identify excess non-current complete builds within each semantic version pair by `completed_at_utc`/`build_id` oldest-first and delete only those version directories beyond the configured retention count.
+- R3: Never delete the current build, never count `building` or `failed` rows toward the successful-build retention count, and never prune a different `(schema_version, feature_version)` pair because a newer semantic pair exists.
+- R4: Keep manifest audit history for a physically pruned complete build by retaining its row and setting `data_path` to null; such a row is not selectable because its data artifact is absent.
+- R5: Add tests for default-five retention, custom retention, current protection, semantic-version isolation, and retained manifest audit rows for pruned files.
+
+Acceptance:
+- A1 (verifies R1): configuration tests prove default `5` means at most five physically retained complete builds per semantic pair including current.
+- A2 (verifies R2): a fixture with six complete builds prunes only the oldest non-current build directory and preserves the five newest eligible builds.
+- A3 (verifies R3): tests prove current/building/failed artifacts and builds from another semantic-version pair are not incorrectly removed or counted.
+- A4 (verifies R4): after pruning, the historical manifest row remains with `data_path=null` and cannot satisfy current/latest-compatible selection.
+- A5 (verifies R5): all five stated retention cases have focused passing tests.
+
+## PR-21: Add Daily Medallion Pipeline And Published Gold Build
+
+Status: Planned
+
+Updated: 2026-08-18
+
+PR: none
+
+Branch: `codex/pr21-daily-medallion-pipeline`
+
+Agent lane: Integration; assign one agent only
+
+Depends on: PR-13, PR-19, PR-20
 
 Commit: `feat: add daily medallion pipeline`
 
 Description:
-- R1: Assemble `dataset=regime_features_daily` by outer-joining the volatility and macro Gold feature families on `observation_date`, with one sorted row per date and no value imputation.
-- R2: Add CLI commands `bootstrap`, `update`, `silver-build`, `gold-build`, and `run-daily`; `run-daily` executes Bronze update -> full deterministic Silver rebuild -> full deterministic Gold rebuild -> inventory refresh.
+- R1: Add CLI commands `bootstrap`, `update`, `silver-build`, `gold-build`, and `run-daily`; `gold-build` assembles the canonical frame and publishes it through PR-19 rather than writing an unversioned Gold file.
+- R2: Make `run-daily` execute Bronze update -> full deterministic Silver rebuild -> canonical Gold assembly -> immutable version write -> atomic manifest publication -> Gold retention -> inventory refresh in exactly that order.
 - R3: Default `bootstrap`, `update`, and `run-daily` to all 13 registry series while supporting repeatable `--series` selection for targeted runs.
-- R4: Make `run-daily` return non-zero when any requested Bronze series fails and skip Silver/Gold publication on that failed run so consumers never see a partially refreshed Gold dataset.
-- R5: Add an end-to-end offline integration test using fake provider fixtures that performs bootstrap, a next-day delta with one revised observation, repeated idempotent rerun, Silver rebuild, Gold rebuild, and inventory refresh.
-- R6: Document a cron/systemd example that runs `run-daily` once per day; do not add a GitHub Actions data-ingestion schedule because the repository lake is not persisted by GitHub Actions.
+- R4: Make `run-daily` return non-zero when any requested Bronze/Silver/Gold stage fails and guarantee that failure before the manifest switch leaves the previously current Gold build selected.
+- R5: Add an end-to-end offline integration test using fake provider fixtures that performs bootstrap, a next-day delta with one revised observation, successful versioned Gold publication, repeated idempotent rerun, and verification that the manifest selects the expected current build.
+- R6: Document a cron/systemd example that runs `run-daily` once per day and document how downstream consumers resolve `manifest.parquet`; do not add a GitHub Actions data-ingestion schedule because the repository lake is not persisted by GitHub Actions.
 
 Acceptance:
-- A1 (verifies R1): Gold output has one sorted row per union date, contains both feature families, and retains nulls where a source is absent.
-- A2 (verifies R2): all five commands parse and `run-daily` executes the four documented stages in order.
+- A1 (verifies R1): all five commands parse and `gold-build` creates a versioned build plus manifest publication with no unversioned `gold/.../year=...` artifact.
+- A2 (verifies R2): an integration spy proves the seven documented `run-daily` stages execute in exact order.
 - A3 (verifies R3): default runs target exactly all 13 registry series and repeated `--series` options restrict execution to the requested subset.
-- A4 (verifies R4): a simulated Bronze provider failure yields non-zero status and leaves the previously published Silver/Gold artifacts unchanged.
-- A5 (verifies R5): the complete stated bootstrap/delta/revision/idempotency/Silver/Gold/inventory scenario passes offline.
-- A6 (verifies R6): README documents a once-daily cron/systemd invocation and the repository contains no scheduled GitHub Actions ingestion workflow.
+- A4 (verifies R4): simulated stage failures yield non-zero status and the prior manifest current build remains unchanged unless the final atomic publication succeeds.
+- A5 (verifies R5): the complete bootstrap/delta/revision/version-publication/idempotency/current-selection scenario passes offline.
+- A6 (verifies R6): README documents once-daily scheduling and manifest-based consumer resolution, and the repository contains no scheduled GitHub Actions ingestion workflow.
 
 ## Definition Of MVP Complete
 
-The MVP is complete only when PR-01 through PR-16 are merged and all of the following are true:
+The MVP is complete only when PR-01 through PR-21 are merged and all of the following are true:
 
 - An empty lake can bootstrap every currently available initial series to the maximum history exposed by its open source.
 - A second run downloads/requests the remaining date range where provider APIs support it, uses the overlap policy for corrections, and writes only changed monthly Bronze partitions.
@@ -691,5 +885,9 @@ The MVP is complete only when PR-01 through PR-16 are merged and all of the foll
 - Older locally stored data is never removed because an upstream source later truncates its public history.
 - Bronze, Silver, Gold, state, manifests, and inventory are all Parquet-backed and manipulated with Polars.
 - Silver contains normalized reusable observations, while Gold contains reusable causal market-state features only.
+- Every published Gold snapshot lives under `lake/gold/dataset=regime_features_daily/versions/build_id=<build_id>/data.parquet` and completed builds are immutable.
+- `lake/gold/dataset=regime_features_daily/manifest.parquet` is the authoritative publication catalog, with exactly one current complete retained build after successful publication.
+- Consumers can select the current compatible build, or the newest compatible complete fallback when necessary, without relying on filesystem modification time or filename guessing.
+- Gold retention keeps the configured number of recent successful builds per semantic version pair without deleting the current build.
 - No HMM, regime classifier, trading signal, portfolio optimizer, or consumer-specific business logic exists in this repository.
-- `run-daily` can be scheduled once per day by the deployment environment and fails safely without publishing partially refreshed Silver/Gold output.
+- `run-daily` can be scheduled once per day and fails safely without switching consumers to a partially refreshed Gold build.
