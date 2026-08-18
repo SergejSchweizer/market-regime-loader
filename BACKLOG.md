@@ -86,7 +86,7 @@ The same four jobs run for `pull_request` targeting `main` and for `merge_group`
 | `vix3m` | CBOE | `VIX3M_History.csv` | `ohlc` | `full_file` | complete public history when exposed |
 | `vix6m` | CBOE | `VIX6M_History.csv` | `ohlc` | `full_file` | complete public history when exposed |
 | `vix1y` | CBOE | `VIX1Y_History.csv` | `ohlc` | `full_file` | complete public history when exposed |
-| `vstoxx` | STOXX | `V2TX` | `scalar` | registry-defined | maximum exposed public history |
+| `vstoxx` | STOXX | `V2TX` | `scalar` | `full_file` | maximum exposed public history |
 | `move` | Yahoo Finance | `^MOVE` | `ohlc` | `date_range` | maximum available history |
 | `ciss` | ECB Data Portal | `CISS.D.U2.Z0Z.4F.EC.SS_CIN.IDX` | `scalar` | `date_range` | complete exposed history |
 | `estr` | ECB Data Portal | `EST.B.EU000A2X2A25.WT` | `scalar` | `date_range` | complete exposed history |
@@ -272,7 +272,7 @@ Commit: `chore(pr-01): bootstrap repository and quality gates`
 Description:
 - R1: Create the Python >=3.13 `uv` project with runtime dependencies `polars`, `pyarrow`, `httpx`, `pydantic`, `PyYAML`, `matplotlib` and dev dependencies `pytest`, `pytest-cov`, `ruff`, `mypy`; create package/test roots and pytest markers `integration` and `network`.
 - R2: Add Make targets `lint`, `type`, `unit`, `integration`, `quality-gate`; `quality-gate` runs the four classes in parallel and required test targets exclude `network`.
-- R3: Add an installable repository pre-push hook that runs those four classes in parallel and blocks push on any failure.
+- R3: Add an installable repository pre-push hook that requires a clean `git status --short`, runs those four classes in parallel, and blocks push on any failure.
 - R4: Add `.github/workflows/quality-gates.yml` for `push`, `pull_request` to `main`, and `merge_group`, with four independent jobs named exactly `lint`, `type`, `unit`, `integration`.
 - R5: Add commit validation for `<type>(pr-XX): <description>` and branch/commit PR-ID matching; generated merge-group commits are excluded from this subject check.
 - R6: Add documented/scripted `main` protection requiring the four checks, pull requests, and no direct pushes; add `.gitignore` for runtime/caches and keep README/ARCHITECTURE synchronized.
@@ -280,7 +280,7 @@ Description:
 Acceptance:
 - A1 (verifies R1): `uv sync --extra dev` resolves, all roots/markers exist, and production deps contain no pandas.
 - A2 (verifies R2): all five targets run their exact class; injected failure makes `quality-gate` fail while all four children are started.
-- A3 (verifies R3): hook install is idempotent; fake success permits push and fake failure blocks it.
+- A3 (verifies R3): hook install is idempotent; dirty worktree or fake gate failure blocks push and clean fake success permits it.
 - A4 (verifies R4): workflow tests prove all three triggers and that the four jobs have no inter-job `needs` dependencies.
 - A5 (verifies R5): valid matching examples pass; missing/wrong PR scope, bad type, and malformed subject fail.
 - A6 (verifies R6): protection setup names the four exact checks and disallows direct `main` pushes; ignored artifacts are not tracked and docs do not contradict the contract.
@@ -305,13 +305,13 @@ Commit: `feat(pr-02): define series and lake contracts`
 
 Description:
 - R1: Add one immutable registry with exactly the 13 series and required provider/source/unit/native-shape/frequency/bootstrap/capability metadata.
-- R2: Restrict capabilities to `date_range|full_file` and native shapes to `ohlc|scalar`; make `vstoxx` unambiguously scalar.
+- R2: Restrict capabilities to `date_range|full_file` and native shapes to `ohlc|scalar`; make `vstoxx` unambiguously scalar/full-file.
 - R3: Add typed helpers for every Bronze/Silver/Gold/build/root/state/manifest path documented above.
 - R4: Validate duplicate IDs, unknown providers, empty source IDs, invalid units/frequencies/shapes/capabilities and add exact fixed-path tests for `2026-08-18` / `20260818T020000Z`.
 
 Acceptance:
 - A1 (verifies R1): registry contains exactly 13 populated entries.
-- A2 (verifies R2): only declared enum values pass and VSTOXX is scalar.
+- A2 (verifies R2): only declared enum values pass and VSTOXX is scalar/full-file.
 - A3 (verifies R3): helpers return every exact documented path without provider-local hard-coded duplicates.
 - A4 (verifies R4): every invalid condition fails before adapter execution and fixed-path tests pass.
 
@@ -454,15 +454,15 @@ Depends on: PR-02, PR-04, PR-05
 Commit: `feat(pr-07): ingest vstoxx history`
 
 Description:
-- R1: Implement STOXX only for canonical `vstoxx` / registered `V2TX` through shared ports.
+- R1: Implement STOXX only for canonical `vstoxx` / registered `V2TX` through shared ports as a `full_file` source.
 - R2: Normalize the selected daily observation to scalar Bronze `value: Float64`; provider-specific extras do not leak into canonical Bronze.
-- R3: Use registry-declared capability, reject invalid/non-finite/conflicting duplicates, and never infer deletion from a shorter upstream response.
+- R3: Reject invalid/non-finite/conflicting duplicates and never infer deletion from a shorter upstream full-file response.
 - R4: Add representative bootstrap/scalar/duplicate/revision/truncation fixtures.
 
 Acceptance:
-- A1 (verifies R1): only VSTOXX is accepted with stable source ID.
+- A1 (verifies R1): only VSTOXX is accepted with stable source ID and full-file capability.
 - A2 (verifies R2): output is unambiguously scalar Bronze.
-- A3 (verifies R3): capability and invalid/truncation behavior are deterministic.
+- A3 (verifies R3): invalid/truncation behavior is deterministic.
 - A4 (verifies R4): all VSTOXX cases pass offline.
 
 ## PR-08: Add Yahoo MOVE Provider
