@@ -38,10 +38,13 @@ Public/Open Sources
 - Incremental ingestion uses a configurable overlap window so recent upstream corrections can replace stored values safely.
 - Full-file providers may be re-downloaded, but only changed or missing observations are merged into the lake.
 - Older locally retained history is never deleted merely because an upstream free source later exposes a shorter range.
-- Writes are deterministic, idempotent, duplicate-safe, restart-safe, and limited to affected monthly partitions.
+- Writes are deterministic, idempotent, duplicate-safe, restart-safe, and limited to affected monthly Bronze/Silver partitions.
 - Production dataframe operations use Polars, not pandas.
 - Parquet is the durable tabular storage format.
 - Gold features are causal: a feature for date `t` may only use information dated `<= t`.
+- Every published Gold dataset is an immutable version identified by `build_id`.
+- Consumers resolve Gold through the dataset-local `manifest.parquet`; they never infer the current build from directory ordering or file modification time.
+- A failed Gold build never replaces the previous current build.
 
 ## Initial Series Catalog
 
@@ -65,7 +68,7 @@ The initial implementation is intentionally limited to this catalog. Additional 
 
 ## Medallion Lake
 
-The physical lake is optimized for low-frequency daily data. Monthly Parquet partitions avoid the small-file problem that would result from one file per day.
+The physical lake is optimized for low-frequency daily data. Bronze and Silver use monthly Parquet partitions to avoid the small-file problem. Gold is smaller and is published as immutable full-dataset snapshots.
 
 ```text
 lake/
@@ -84,9 +87,14 @@ lake/
 
   gold/
     dataset=regime_features_daily/
-      year=<YYYY>/
-        month=<MM>/
+      versions/
+        build_id=20260817T020000Z/
           data.parquet
+        build_id=20260818T020000Z/
+          data.parquet
+        build_id=20260819T020000Z/
+          data.parquet
+      manifest.parquet
 
   state/
     ingestion_state.parquet
@@ -148,6 +156,62 @@ Gold contains reusable, causal market-state features, including planned families
 
 Gold does not assign regimes or portfolio actions.
 
+## Published Gold Contract
+
+A successful Gold build is stored at:
+
+```text
+lake/gold/
+└── dataset=regime_features_daily/
+    ├── versions/
+    │   └── build_id=<YYYYMMDDTHHMMSSZ>/
+    │       └── data.parquet
+    └── manifest.parquet
+```
+
+Completed build directories are immutable. A later run creates a new build directory; it does not modify the previously published Gold snapshot.
+
+The dataset-local `manifest.parquet` is the authoritative publication catalog. Planned fields include:
+
+```text
+dataset_id
+build_id
+status                # building | complete | failed
+current
+started_at_utc
+completed_at_utc
+schema_version
+feature_version
+min_date
+max_date
+row_count
+data_path
+```
+
+Publication rules:
+
+- only `status=complete` may have `current=true`;
+- after the first successful publication, exactly one retained build is current;
+- the previous current build remains current until a new build has been fully written and validated;
+- a failed or incomplete build never becomes current;
+- consumers must not select `max(build_id)` or the newest file by mtime as a substitute for manifest resolution.
+
+### Consumer resolution
+
+A downstream consumer such as `portfell` should resolve Gold as follows:
+
+1. read `manifest.parquet`;
+2. prefer the row where `status=complete` and `current=true` if its `schema_version` and `feature_version` are supported;
+3. if the current build is incompatible, choose the newest compatible `complete` row with a non-null `data_path`, ordered by `completed_at_utc DESC, build_id DESC`;
+4. read only the selected row's `data_path`;
+5. never select `building` or `failed` rows.
+
+This permits controlled consumer upgrades and rollback without coupling consumers to the loader's filesystem discovery logic.
+
+### Retention
+
+The planned default retention policy keeps five successful physical builds **including the current build** for each `(schema_version, feature_version)` pair. The current build is never pruned. Historical manifest rows remain as audit metadata even when an older physical build is pruned.
+
 ## Bootstrap And Daily Delta Behavior
 
 For every registered series:
@@ -178,6 +242,8 @@ upsert changed/new observations only
 
 The default planned correction overlap is seven calendar days. Provider capability is explicit: a provider is either range-query capable or a compact full-file source. The logical result must remain idempotent in both cases.
 
+The planned daily pipeline publishes Gold only after Bronze/Silver processing, Gold assembly, immutable version write, and validation succeed. The final manifest switch is the publication boundary.
+
 ## Planned Repository Structure
 
 The implementation follows the same narrow dependency principle used in `crypto-history-loader`, adapted to daily macro/volatility data:
@@ -206,6 +272,7 @@ A PR is incomplete if it changes any of the following without updating the appli
 - provider/source ownership;
 - medallion semantics or physical lake paths;
 - Bronze, Silver, Gold, state, or manifest contracts;
+- Gold build versioning, publication, compatibility, or retention behavior;
 - bootstrap/delta/revision behavior;
 - package boundaries or dependency direction;
 - CLI/runtime behavior documented for operators;
@@ -215,8 +282,8 @@ A PR is incomplete if it changes any of the following without updating the appli
 
 ## Current Status
 
-The repository is currently at the architecture/backlog stage. `BACKLOG.md` defines the atomic implementation sequence for two parallel weak agents. Production loaders and CLI commands should only be documented as executable after their implementing PRs are merged into `main`.
+The repository is currently at the architecture/backlog stage. `BACKLOG.md` defines the atomic implementation sequence for two parallel weak agents. Production loaders, Gold publication, and CLI commands should only be documented as executable after their implementing PRs are merged into `main`.
 
 ## Design Reference
 
-The medallion and lake-boundary approach is derived from `SergejSchweizer/crypto-history-loader`, but this repository intentionally uses a simpler daily-series model and monthly Parquet partitions rather than copying minute/tick-specific complexity.
+The medallion and lake-boundary approach is derived from `SergejSchweizer/crypto-history-loader`, but this repository intentionally uses a simpler daily-series model and monthly Bronze/Silver partitions rather than copying minute/tick-specific complexity. Gold uses immutable build snapshots plus a dataset-local manifest because it is the stable consumer-facing interface.
