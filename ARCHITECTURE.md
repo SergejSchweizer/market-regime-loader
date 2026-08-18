@@ -2,11 +2,11 @@
 
 This document is the durable architecture contract for `market-regime-loader`.
 
-It must remain synchronized with code changes that alter repository scope, supported series, providers, medallion paths, dataset contracts, Gold publication/versioning, runtime/update behavior, package boundaries, or quality guarantees. `README.md` is the concise consumer/operator sidecar; `BACKLOG.md` is the delivery/ticket source of truth.
+It must remain synchronized with code changes that alter repository scope, supported series, providers, medallion paths, timestamp conventions, dataset contracts, Gold publication/versioning/sidecars, runtime/update behavior, package boundaries, or quality guarantees. `README.md` is the concise consumer/operator sidecar; `BACKLOG.md` is the delivery/ticket source of truth.
 
 ## System Shape
 
-`market-regime-loader` is a reusable daily market-state data platform. It downloads the maximum open/public history available from each configured provider, normalizes that history into canonical daily series, derives causal market-state features, and keeps the lake current using restart-safe incremental updates.
+`market-regime-loader` is a reusable daily market-state data platform. It downloads maximum open/public history, normalizes provider data into canonical daily series, derives causal market-state features, and publishes immutable Gold snapshots for downstream consumers.
 
 ```text
                         registry / runtime config
@@ -22,7 +22,7 @@ It must remain synchronized with code changes that alter repository scope, suppo
                     |                           |
                     v                           v
              provider adapters              lake IO
-              HTTP + parsing          Polars + Parquet merge
+              HTTP + parsing        Polars/Parquet/sidecars
                     |                           |
                     +-------------+-------------+
                                   |
@@ -30,20 +30,20 @@ It must remain synchronized with code changes that alter repository scope, suppo
                   lake/bronze -> lake/silver -> lake/gold
                                                    |
                                                    v
-                                      immutable published builds
+                                      immutable build bundle
+                                  parquet + json + png
                                                    |
                                                    v
-                                           manifest.parquet
+                                  root publication sidecars
+                              manifest.parquet/json + plot
                                                    |
                                                    v
                                       downstream consumers
 ```
 
-The repository owns data acquisition, normalization, persistence, causal reusable features, coverage metadata, update state, Gold build versioning, and Gold publication metadata. It does not own regime labels, models, strategy decisions, portfolio allocation, or trading execution.
+The repository owns data acquisition, normalization, persistence, causal reusable features, coverage metadata, update state, Gold versioning, and Gold publication metadata/sidecars. It does not own regime labels, models, strategy decisions, portfolio allocation, or trading execution.
 
 ## Dependency Direction
-
-The intended dependency direction is narrow:
 
 ```text
 api / scripts ----------> application ----------> typed contracts / DTOs
@@ -57,28 +57,26 @@ ingestion adapters -------------+
 
 Rules:
 
-- `api/` may depend on `application/`, but must not directly implement provider HTTP logic or Parquet persistence rules.
-- `application/` owns use-case orchestration, registry contracts, planning, policies, Gold publication state transitions, and deterministic business behavior.
-- `ingestion/` owns provider adapters, HTTP/parsing details, and physical Parquet lake IO.
-- `ingestion/` must not own CLI parsing or portfolio/model behavior.
-- Downstream consumer projects must read published dataset contracts rather than import provider internals.
+- `api/` may depend on `application/`, but must not implement provider HTTP behavior or persistence rules.
+- `application/` owns registry contracts, bootstrap/delta planning, canonical schemas, Gold publication state transitions, and deterministic policy.
+- `ingestion/` owns HTTP/parsing details and physical Parquet/JSON/PNG persistence.
+- `ingestion/` must not own CLI parsing, regime classification, portfolio logic, or trading behavior.
+- Consumers read published contracts rather than import provider internals.
 - Consumers must not infer the current Gold build from filesystem ordering or modification timestamps.
-
-If a future change crosses boundaries, define or change the typed contract first, then update the adapter or orchestrator.
 
 ## Layer Ownership
 
 | Layer | Owns | Must not own |
 |---|---|---|
-| `api/` | CLI parsing, command wiring, human/machine output shape | provider HTTP requests, Parquet implementation details, model logic |
-| `application/` | series registry, provider capability contracts, bootstrap/delta planning, medallion contracts, Gold build/publication contracts, orchestration, validation, runtime policy | HTTP parsing internals, physical low-level Parquet implementation, trading strategy logic |
-| `ingestion/` | source adapters, HTTP behavior, source parsing, Polars/Parquet reads and writes, partition/version paths, manifest/state persistence adapters | CLI behavior, model decisions, portfolio allocation |
-| `scripts/` | operational entrypoints and schedulable wrappers | hidden business rules bypassing application contracts |
-| `tests/` | contract, unit, regression, integration, architecture validation | production behavior |
+| `api/` | CLI parsing, command wiring, output shape | provider requests, persistence internals, model logic |
+| `application/` | registry, provider capability, range planning, medallion contracts, timestamp policy, feature contracts, publication state machine, validation | HTTP parsing internals, low-level file replacement, strategy logic |
+| `ingestion/` | provider adapters, Polars/Parquet IO, JSON serialization, feature-profile plot persistence, filesystem paths | CLI policy, regime decisions, portfolio allocation |
+| `scripts/` | schedulable operational entrypoints | hidden domain rules |
+| `tests/` | unit, contract, regression, integration, architecture validation | production behavior |
 
 ## Initial Series Registry
 
-The first implementation contains exactly these canonical series:
+The first implementation contains exactly:
 
 ```text
 vix
@@ -99,59 +97,48 @@ usd_broad
 Provider ownership:
 
 ```text
-CBOE         -> vix, vix9d, vix3m, vix6m, vix1y
-STOXX        -> vstoxx
-Yahoo        -> move
-ECB          -> ciss, estr
-FRED         -> euro_hy_oas, us_2y, us_10y, usd_broad
+CBOE   -> vix, vix9d, vix3m, vix6m, vix1y
+STOXX  -> vstoxx
+Yahoo  -> move
+ECB    -> ciss, estr
+FRED   -> euro_hy_oas, us_2y, us_10y, usd_broad
 ```
 
-Every registry entry must declare at least:
-
-```text
-series_id
-provider
-source_id_or_file
-unit
-native_shape        # ohlc | scalar
-frequency
-bootstrap_strategy
-provider_capability # date_range | full_file
-```
-
-No unregistered series may be ingested or published.
+Every registry entry declares `series_id`, provider, source ID/file, unit, native shape, frequency, bootstrap strategy, and provider capability (`date_range` or `full_file`). No unregistered series may be ingested or published.
 
 ## Medallion Data Flow
 
 ```text
 Bronze
   provider-shaped observations
-  ingestion metadata
-  deterministic monthly partitions
-  idempotent natural-key upserts
+  monthly partitions
+  audit-friendly ingestion metadata
              |
              v
 Silver
-  canonical daily schema
-  canonical series identity
-  validated types and units
+  canonical daily long-form series
+  observation_date: Date
   no synthetic observations
              |
              v
 Gold logical frame
-  reusable causal market-state features
-  trailing transformations only
-  no labels, no strategies, no portfolio decisions
+  timestamp_m1: Datetime(us, UTC)
+  reusable causal features
              |
              v
-Gold publication
-  immutable build_id snapshot
-  manifest-governed current selection
+Gold immutable build
+  data.parquet
+  manifest.json
+  feature_profile.png
+             |
+             v
+Dataset-root publication
+  manifest.parquet  <- authority
+  manifest.json     <- deterministic mirror
+  feature_profile.png <- current visual sidecar
 ```
 
-### Bronze
-
-Bronze preserves source observations for auditability. Column names and types may be normalized, but source values must not be converted into strategy-specific features.
+## Bronze Contract
 
 Required common fields:
 
@@ -159,15 +146,12 @@ Required common fields:
 series_id: String
 provider: String
 observation_date: Date
-fetched_at_utc: Datetime[UTC]
+fetched_at_utc: Datetime(time_zone="UTC")
 source_id: String
 source_url: String
 ```
 
-Native fields:
-
-- OHLC providers retain `open`, `high`, `low`, `close`.
-- Scalar providers retain `value`.
+OHLC providers retain `open`, `high`, `low`, `close`; scalar providers retain `value`.
 
 Natural key:
 
@@ -175,16 +159,11 @@ Natural key:
 (provider, series_id, observation_date)
 ```
 
-Bronze rules:
+Bronze never synthesizes observations, never deletes retained history merely because an upstream free window shrinks, and rewrites only affected monthly partitions.
 
-- never synthesize missing market observations;
-- never delete old locally retained rows only because a public upstream window later shrinks;
-- recent revised upstream observations may replace equal-key rows;
-- affected monthly partitions only are rewritten.
+## Silver Contract
 
-### Silver
-
-Silver exposes one canonical daily contract independent of provider shape:
+Silver exposes one provider-independent daily schema:
 
 ```text
 observation_date: Date
@@ -197,62 +176,69 @@ close: Float64 nullable
 unit: String
 provider: String
 source_id: String
-fetched_at_utc: Datetime[UTC]
+fetched_at_utc: Datetime(time_zone="UTC")
 ```
 
 Rules:
 
 - OHLC series use `value == close`.
-- Scalar series use the source observation as `value`; OHLC fields remain null.
+- Scalar series use source `value`; OHLC fields remain null.
 - Natural key is `(series_id, observation_date)`.
 - Duplicate keys are invalid after canonicalization.
-- Missing dates remain absent/null; Silver does not fabricate market observations to force a daily grid.
-- Transformations must be deterministic for identical Bronze input.
+- Missing dates remain missing; no forward-fill/back-fill/interpolation occurs.
 
-### Gold logical dataset
+## Gold Timestamp Contract
 
-Gold publishes reusable daily market-state features under logical dataset ID:
+Gold deliberately matches the canonical timestamp convention used in `crypto-history-loader`.
+
+The first and only temporal join key is:
+
+```text
+timestamp_m1: Datetime(time_unit="us", time_zone="UTC")
+```
+
+No `observation_date` column is allowed in Gold.
+
+Because the market-regime sources are daily, the Silver date is converted deterministically to UTC midnight:
+
+```text
+observation_date = 2026-08-18
+        ->
+timestamp_m1 = 2026-08-18T00:00:00.000000+00:00
+```
+
+The `_m1` name is an interoperability convention, not a claim that this dataset contains a complete one-minute grid. The Gold dataset remains daily-frequency: at most one canonical row exists for a source calendar date.
+
+Gold timestamp invariants:
+
+- dtype is exactly Polars `Datetime(time_unit="us", time_zone="UTC")`;
+- values are UTC midnight for the represented source day;
+- rows are strictly increasing by `timestamp_m1`;
+- `timestamp_m1` is unique;
+- all cross-feature joins use `timestamp_m1`;
+- feature calculations remain causal relative to the represented source day.
+
+## Gold Logical Dataset
+
+Logical dataset ID:
 
 ```text
 regime_features_daily
 ```
 
-Planned initial feature families:
+Initial feature families:
 
-- volatility levels and trailing changes;
-- VIX term-structure ratios and slopes;
-- trailing standardized VSTOXX and MOVE levels;
-- CISS trailing changes;
-- euro high-yield OAS trailing changes;
-- US 10Y minus US 2Y curve slope;
-- Treasury-yield trailing changes;
-- euro short-rate level;
-- broad USD trailing changes.
+- volatility levels, trailing changes, and trailing standardized values;
+- VIX term-structure ratios/slopes;
+- CISS changes;
+- euro HY OAS changes;
+- US 2Y/10Y levels, changes, and 10Y-minus-2Y slope;
+- €STR level/change;
+- broad USD level/change.
 
-Causality rule:
-
-```text
-feature(date=t) may use observations dated <= t only
-```
-
-Gold must not publish:
-
-```text
-risk_on
-risk_off
-HMM state IDs
-regime class labels
-portfolio weights
-buy/sell signals
-prediction targets
-forward-looking labels
-```
-
-Those belong to downstream modelling/portfolio repositories.
+Gold does not publish HMM states, `risk_on`/`risk_off`, signals, targets, or portfolio weights.
 
 ## Physical Lake Layout
-
-Daily macro/index source series are stored in monthly Parquet partitions. Gold is small enough that each published build is a complete immutable snapshot stored as one Parquet file.
 
 ```text
 lake/
@@ -272,13 +258,17 @@ lake/
   gold/
     dataset=regime_features_daily/
       versions/
-        build_id=20260817T020000Z/
-          data.parquet
         build_id=20260818T020000Z/
           data.parquet
+          manifest.json
+          feature_profile.png
         build_id=20260819T020000Z/
           data.parquet
+          manifest.json
+          feature_profile.png
       manifest.parquet
+      manifest.json
+      feature_profile.png
 
   state/
     ingestion_state.parquet
@@ -288,173 +278,202 @@ lake/
     dataset_inventory.parquet
 ```
 
-The lake is a runtime artifact and must be ignored by Git.
+Bronze/Silver monthly partitioning is optimized for incremental source maintenance. Gold is small enough that every successful build is a complete immutable snapshot.
 
-`lake/manifests/*` contains operational ingestion/inventory metadata. `lake/gold/dataset=regime_features_daily/manifest.parquet` is different: it is the dataset-local Gold publication catalog and is part of the consumer-facing Gold contract.
+`lake/manifests/*` contains operational ingestion metadata. `lake/gold/dataset=regime_features_daily/manifest.parquet` is different: it is the consumer-facing Gold publication authority.
 
-## Parquet And Polars Contract
+## Gold Build Bundle
 
-Production dataframe behavior is Polars-first.
-
-- pandas must not be introduced into production ingestion/transformation code.
-- Parquet is the durable tabular storage format for Bronze, Silver, Gold, state, manifests, and inventory outputs unless a future explicit architecture decision changes the contract.
-- Reads across multiple Bronze/Silver monthly partitions must return deterministic ordering.
-- Bronze/Silver writes must be atomic at monthly-file granularity: write a temporary file, then replace the destination.
-- Bronze/Silver upserts use explicit natural keys and deterministic new-row precedence.
-- A logical no-op source rerun must not create duplicate observations.
-- Only Bronze/Silver monthly partitions containing changed/new rows may be rewritten.
-- Gold builds are immutable snapshots; completed version files are never updated in place.
-- Gold manifest replacement must be atomic.
-
-## Gold Build Identity
-
-Every Gold publication attempt has a build ID with exact UTC-sortable format:
+Every publication attempt has a build ID formatted exactly:
 
 ```text
 YYYYMMDDTHHMMSSZ
 ```
 
-Example:
+A successful completed build directory contains exactly the required consumer/audit artifacts:
 
 ```text
-20260818T020000Z
+versions/build_id=<build_id>/
+  data.parquet
+  manifest.json
+  feature_profile.png
 ```
 
-The build ID is an identity, not the authority for current selection. A lexicographically later build may be failed, incompatible, or not current.
+### `data.parquet`
 
-A completed build artifact lives at:
+Contains the full canonical Gold frame. Its first column is `timestamp_m1`; all remaining columns are deterministic numeric-or-null regime features. A completed file is immutable.
+
+### build `manifest.json`
+
+The build JSON follows the same Parquet + JSON-manifest pattern used by `crypto-history-loader`. It is deterministic (`sort_keys` semantics), UTF-8, and records at least:
 
 ```text
-lake/gold/dataset=regime_features_daily/
-  versions/build_id=<build_id>/data.parquet
+dataset_id
+build_id
+schema_version
+feature_version
+status
+started_at_utc
+completed_at_utc
+rows_out
+columns
+min_timestamp
+max_timestamp
+data_path
+plot_path
 ```
 
-Completed build paths are immutable. Reusing an existing completed build ID is an error.
+It describes that immutable build only. It is not the multi-build consumer selection authority.
 
-## Gold Manifest Contract
+### build `feature_profile.png`
 
-The authoritative publication catalog lives only at:
+The build plot is generated from exactly the frame written to `data.parquet`. It is a deterministic numeric feature distribution/profile visualization analogous to the Gold feature plot in `crypto-history-loader`.
+
+Rules:
+
+- `timestamp_m1` is excluded from distributions;
+- only numeric Gold feature columns are plotted;
+- no sampling dependent on wall-clock/random state is allowed;
+- plot generation is mandatory for a successful published build;
+- a plot failure prevents that build from becoming current.
+
+## Dataset-Root Gold Sidecars
+
+The dataset root contains three stable files:
 
 ```text
-lake/gold/dataset=regime_features_daily/manifest.parquet
+manifest.parquet
+manifest.json
+feature_profile.png
 ```
 
-It contains one row per attempted build with the following minimum contract:
+### Root `manifest.parquet`
+
+This is the only authoritative current-build catalog. It contains one row per attempted build with:
 
 ```text
 dataset_id: String
 build_id: String
 status: String              # building | complete | failed
 current: Boolean
-started_at_utc: Datetime[UTC]
-completed_at_utc: Datetime[UTC] nullable
+started_at_utc: Datetime(time_zone="UTC")
+completed_at_utc: Datetime(time_zone="UTC") nullable
 schema_version: Int64
 feature_version: Int64
-min_date: Date nullable
-max_date: Date nullable
+min_timestamp: Datetime(time_unit="us", time_zone="UTC") nullable
+max_timestamp: Datetime(time_unit="us", time_zone="UTC") nullable
 row_count: Int64 nullable
 data_path: String nullable
+build_manifest_path: String nullable
+plot_path: String nullable
 ```
 
 Manifest invariants:
 
-- `build_id` is unique within the dataset manifest.
-- `status` is one of `building`, `complete`, `failed`.
-- only `complete` rows may have `current=true`.
-- before the first successful publication, zero rows may be current.
-- after a successful publication, exactly one physically retained complete build is current.
-- a selectable complete build must have non-null `data_path` pointing to its immutable snapshot.
-- `manifest.parquet` ordering is deterministic by `started_at_utc`, then `build_id`.
+- `build_id` is unique;
+- only `complete` may be current;
+- before first successful publication there may be zero current rows;
+- afterward exactly one physically retained complete build is current;
+- selectable rows require all three artifact paths non-null;
+- ordering is deterministic by `started_at_utc`, then `build_id`.
 
-## Gold Publication State Machine
+### Root `manifest.json`
 
-The publication boundary is the final atomic manifest switch, not creation of a file under `versions/`.
+This is a deterministic JSON mirror of the authoritative catalog, intended for inspection and non-Parquet tooling. Its top-level shape is:
 
-```text
-new build requested
-      |
-      v
-manifest: building, current=false
-      |
-      v
-write immutable version data.parquet
-      |
-      v
-validate schema / uniqueness / coverage / row count
-      |
-      +---------------- failure ----------------+
-      |                                         |
-      v                                         v
-atomic manifest switch                     manifest failed
-new = complete,current=true                current=false
-old = complete,current=false               old current unchanged
+```json
+{
+  "dataset_id": "regime_features_daily",
+  "current_build_id": "20260818T020000Z",
+  "builds": []
+}
 ```
 
-Rules:
+`builds` serializes the same logical rows and ordering as `manifest.parquet`. The JSON must never independently choose a different current build. A consistency test must prove that its current build and build records correspond to the Parquet catalog.
 
-1. The previous current build remains current while a new build is being created.
-2. A new build may become current only after its Parquet artifact is durably written and validated.
-3. Promotion and demotion of current rows occur in one atomic manifest replacement.
-4. Any failure before that switch leaves the previous current build authoritative.
-5. A consumer never needs to inspect an incomplete version directory to decide what is published.
+### Root `feature_profile.png`
 
-## Downstream Consumer Resolution
+This is the feature profile for the build identified as current by `manifest.parquet`. It is a stable operator-facing path; version-specific historical plots remain under their immutable build directories.
 
-Downstream systems such as `portfell` consume the manifest contract, not loader internals.
+## Publication Transaction
 
-Resolution algorithm:
+The root `manifest.parquet` replacement is the **commit point**. JSON and PNG are required sidecars but do not independently publish a build.
+
+Planned sequence:
+
+```text
+1. register attempted build as building,current=false
+2. create immutable build data.parquet
+3. create immutable build manifest.json
+4. create immutable build feature_profile.png
+5. validate all three build artifacts and Gold schema/timestamp/coverage
+6. build next catalog in memory
+7. stage root manifest.json mirror
+8. stage root feature_profile.png
+9. stage root manifest.parquet
+10. transactionally replace root JSON/PNG and replace manifest.parquet last
+```
+
+Failure policy:
+
+- the previous authoritative `manifest.parquet` remains unchanged until the final commit point;
+- supplemental root files are staged and rollback-safe;
+- if any build artifact or root sidecar fails validation/replacement before the commit point, the old current build remains authoritative;
+- the failed attempted build is recorded non-current when a valid catalog update can be safely written;
+- consumers never need to inspect incomplete version directories.
+
+This is transaction-like filesystem publication with rollback; it does not rely on pretending that three independent filesystem renames are one hardware-atomic operation.
+
+## Consumer Resolution
+
+Consumers such as `portfell` use only the root Parquet catalog for selection:
 
 ```text
 1. Read manifest.parquet.
-2. Find status=complete AND current=true.
-3. If that row's schema_version and feature_version are supported and data_path is non-null, use it.
-4. Otherwise select the newest compatible status=complete row with non-null data_path,
-   ordered by completed_at_utc DESC, build_id DESC.
-5. Read exactly that row's data_path.
-6. Never select building or failed rows.
+2. Prefer status=complete AND current=true.
+3. Require supported schema_version and feature_version.
+4. Require non-null data_path, build_manifest_path, and plot_path.
+5. If current is incompatible, choose newest compatible complete row by
+   completed_at_utc DESC, build_id DESC.
+6. Read exactly data_path.
+7. Never select building or failed rows.
 ```
 
-This allows a consumer to continue on a previous compatible Gold build during a schema/feature migration without guessing from filenames.
+The JSON/PNG sidecars are informational/audit/visual artifacts and are not required by `portfell` to locate the data frame.
 
-The manifest contract is intentionally data-oriented so consumers do not need to import the `market-regime-loader` Python package.
+## Retention
 
-## Gold Retention
-
-Planned default:
+Default planned retention:
 
 ```text
 gold_retention_successful_builds = 5
 ```
 
-The value means five physically retained `complete` builds **including the current build** for each `(schema_version, feature_version)` pair.
+Retention is evaluated per `(schema_version, feature_version)` pair. One physical build is a directory bundle; its `data.parquet`, `manifest.json`, and `feature_profile.png` are retained or pruned together.
 
-Retention rules:
+Rules:
 
-- never prune the current build;
-- `building` and `failed` attempts do not count toward the successful-build limit;
-- retention is evaluated separately for each semantic `(schema_version, feature_version)` pair;
-- oldest eligible non-current complete builds are pruned first by `completed_at_utc`, then `build_id`;
-- manifest audit rows remain after physical pruning, but `data_path` becomes null and the row is therefore not selectable;
-- retention runs only after a successful publication.
+- never prune current;
+- building/failed attempts do not count toward the successful-build limit;
+- different semantic version pairs are isolated;
+- oldest eligible non-current complete directories are pruned first;
+- audit catalog rows remain after physical pruning;
+- pruned rows set `data_path`, `build_manifest_path`, and `plot_path` to null and become unselectable.
 
-## Bootstrap And Incremental Update Semantics
+## Parquet, JSON, Plot, And Polars Contract
 
-For each series, planning depends only on durable lake state and an injected current date.
+- Production dataframe operations are Polars-first; pandas is not introduced into production transformation code.
+- Bronze/Silver and Gold tabular data use Parquet.
+- JSON sidecars are UTF-8, deterministic, and written via temporary file + fsync + replace semantics.
+- Feature-profile PNG generation uses a deterministic plotting function and the exact published frame.
+- Bronze/Silver writes are atomic at monthly-file granularity.
+- Gold completed build directories are immutable.
+- Root publication sidecars use staging and rollback, with `manifest.parquet` replaced last as commit point.
+- A no-op rerun does not create duplicate logical source observations; Gold build policy may additionally avoid publication when input identity is unchanged if implemented by a later explicit contract.
 
-### Bootstrap
+## Bootstrap And Incremental Source Update
 
-When no Bronze observations exist:
-
-```text
-mode = bootstrap
-request = maximum open/public history exposed by provider
-```
-
-"Maximum history" means the maximum history available from the configured open/public source. Paid history that the provider does not expose is outside the repository contract.
-
-### Incremental
-
-When Bronze history exists:
+When no Bronze history exists, request maximum open/public history. When history exists:
 
 ```text
 latest = latest stored observation_date
@@ -462,242 +481,64 @@ start  = latest - overlap_days
 end    = injected current date
 ```
 
-Default overlap:
-
-```text
-7 calendar days
-```
-
-The overlap exists so provider corrections can safely replace recent data.
-
-### Provider Capabilities
-
-Providers declare one of two fetch modes:
-
-```text
-date_range
-full_file
-```
-
-`date_range` providers should request only the planned update range.
-
-`full_file` providers may fetch the compact authoritative history file on every update, but merge/write behavior must still limit Bronze changes to missing/revised logical observations and affected monthly partitions.
-
-### State
-
-`lake/state/ingestion_state.parquet` is keyed by:
-
-```text
-(provider, series_id)
-```
-
-Planned state fields include:
-
-```text
-last_success_utc
-last_observed_date
-last_requested_start
-last_requested_end
-mode
-fetched_row_count
-written_row_count
-```
-
-State is written only after successful durable ingestion.
+Default overlap is seven calendar days. `date_range` providers request that range; `full_file` providers may refetch their compact authoritative history but merge only missing/revised rows. Upstream truncation never deletes older local history.
 
 ## Daily Pipeline Publication Order
-
-The planned `run-daily` sequence is:
 
 ```text
 1. Bronze update
 2. deterministic Silver rebuild
-3. canonical Gold assembly
-4. immutable Gold version write
-5. Gold validation
-6. atomic Gold manifest publication
-7. Gold retention
-8. inventory refresh
+3. Gold timestamp normalization and feature assembly
+4. immutable data.parquet write
+5. immutable build manifest.json
+6. immutable build feature_profile.png
+7. Gold validation
+8. root JSON/PNG staging
+9. authoritative manifest.parquet publication
+10. Gold retention
+11. inventory refresh
 ```
 
-A failure before step 6 must not change the current Gold build. A failure after a successful step 6 may cause maintenance/inventory work to fail, but consumers still have a complete published Gold build.
+Any failure before step 9 leaves the previous current Gold build authoritative.
 
-## Revision And History-Retention Policy
+## Missing-Data And Causality Policy
 
-Public sources may revise recent observations or reduce the amount of free history they expose.
+- Bronze does not synthesize observations.
+- Silver does not fill absent source days.
+- Gold may outer-join feature families but retains nulls when inputs are unavailable.
+- Rolling features use only current/past observations.
+- No centered windows or future values are allowed.
+- Converting a daily source date to UTC midnight does not change information availability; it is a schema interoperability representation. Any later publication-time/availability-time model must be explicit before using data intraday.
 
-Therefore:
+## Testing Contract
 
-1. equal-key revised Bronze observations may replace recent stored values;
-2. incremental requests include a correction overlap;
-3. a shorter upstream response must never be interpreted as an instruction to delete older locally retained source history;
-4. source truncation or missing history must be visible through manifests/inventory rather than silently rewriting the past;
-5. future provider migrations must preserve canonical series identity and document lineage changes;
-6. Gold build retention is independent of Bronze source-history retention: pruning an old Gold snapshot never removes Bronze/Silver source history needed to rebuild it.
+Default tests are offline. Provider tests use small fixtures or mocked HTTP responses.
 
-## Missing-Data Policy
+Required Gold contract tests include:
 
-The loader distinguishes "provider returned no observation" from "zero".
-
-- Bronze does not synthesize rows.
-- Silver does not forward-fill, backward-fill, interpolate, or create artificial zero observations unless a future dataset contract explicitly defines such behavior.
-- Gold trailing transformations operate only on information actually available at or before the feature date.
-- Cross-series Gold joins must preserve nulls when an input is unavailable rather than borrow future data.
-- Any later as-of alignment must be backward-looking and explicitly documented.
-
-## Operational Manifests And Inventory
-
-Operational metadata remains under:
-
-```text
-lake/manifests/ingestion_runs.parquet
-lake/manifests/dataset_inventory.parquet
-```
-
-`ingestion_runs.parquet` records provider/series run-level source and write outcomes.
-
-`dataset_inventory.parquet` provides per-series coverage metadata such as earliest/latest observation, row count, file count, and duplicate information where meaningful.
-
-These operational manifests do not choose the current Gold build. Gold publication state belongs exclusively to the dataset-local Gold `manifest.parquet`.
-
-## Determinism And Idempotency
-
-For identical source observations and configuration:
-
-- the same natural keys must be produced;
-- the same canonical values must be produced;
-- the same deterministic row order must be produced;
-- repeated ingestion must not create duplicate rows;
-- repeated Silver/Gold logical builds must not change feature values;
-- each successful published Gold run creates a distinct immutable build identity unless the caller intentionally injects an existing ID, which must be rejected;
-- current publication changes only through an atomic manifest state transition;
-- wall-clock timestamps may appear only in explicit ingestion/build metadata fields, never in market features.
-
-Tests must inject dates/times rather than use uncontrolled `today()` behavior for planning/build-ID logic.
-
-## Runtime Side-Effect Boundaries
-
-Side effects must remain isolated:
-
-```text
-HTTP/network                  -> ingestion provider adapters
-Bronze/Silver IO             -> ingestion lake adapters
-Gold version file IO         -> ingestion Gold storage adapter
-state/operational manifest IO-> ingestion persistence adapters
-Gold publication state       -> application publication service + manifest persistence port
-planning/orchestration        -> application services
-CLI output                    -> api commands
-scheduled process wiring      -> scripts
-```
-
-An application service may call an ingestion port, but business rules must not be hidden inside HTTP or Parquet utility code.
-
-## Test Strategy
-
-Default tests must be offline.
-
-Provider tests use:
-
-- small committed fixtures; or
-- mocked HTTP responses.
-
-Default quality checks must not download real market data.
-
-Network integration tests, when introduced, must be explicitly marked and excluded from the default test command.
-
-Important contract tests include:
-
-- exact registry inventory;
-- exact Bronze/Silver and versioned Gold paths;
-- natural-key deduplication;
-- atomic Bronze/Silver writes;
-- immutable Gold version writes;
-- no-op ingestion idempotency;
-- correction replacement;
-- unaffected-month preservation;
-- bootstrap versus incremental planning;
-- provider-capability behavior;
-- Bronze-to-Silver canonicalization;
-- Gold causality and no-look-ahead behavior;
-- Gold canonical assembly/schema validation;
-- build-ID validation;
-- Gold manifest schema and invariants;
-- atomic current-build switching;
-- failure preservation of the previous current build;
-- current/latest-compatible consumer selection examples;
-- Gold retention and current-build protection;
-- state/operational-manifest round-trip;
-- sidecar documentation consistency where practical.
+- `timestamp_m1` exact name and position;
+- exact `Datetime(us, UTC)` dtype;
+- daily date -> UTC-midnight conversion;
+- no `observation_date` in Gold;
+- strict timestamp uniqueness/order;
+- causal feature calculations;
+- immutable version paths;
+- deterministic build JSON;
+- deterministic numeric feature-profile PNG generation;
+- JSON/Parquet catalog consistency;
+- root plot corresponds to current build;
+- publication failure rollback at each build/root sidecar stage;
+- current/compatible consumer resolution;
+- bundle-level retention.
 
 ## Documentation Sidecars
 
-`README.md` and `ARCHITECTURE.md` are treated as implementation sidecars, not optional prose.
+`README.md` and `ARCHITECTURE.md` are implementation sidecars. `BACKLOG.md` is the delivery contract.
 
-### `README.md`
+Any PR changing scope, series registry, providers, physical lake layout, timestamp semantics, Bronze/Silver/Gold schemas, build bundles, root manifests/plots, publication/retention behavior, feature semantics, package boundaries, CLI behavior, or quality guarantees must update the applicable sidecars in the same PR.
 
-Owns the concise public/operator view:
+## Relationship To `crypto-history-loader`
 
-- repository purpose;
-- scope boundaries;
-- supported series overview;
-- medallion overview;
-- lake layout overview;
-- Gold publication/consumer-resolution overview;
-- bootstrap/delta behavior;
-- current executable/operator surface only after implementation exists.
+`crypto-history-loader` is the design reference for deterministic Medallion ownership, Polars/Parquet lake behavior, explicit Gold contracts, restart safety, `timestamp_m1`, JSON Gold manifests, and numeric feature-profile plots.
 
-### `ARCHITECTURE.md`
-
-Owns the durable engineering contract:
-
-- package boundaries and dependency direction;
-- dataset/medallion semantics;
-- natural keys and physical layout;
-- Gold build identity, manifest, publication and retention contracts;
-- update/revision/missing-data rules;
-- determinism, idempotency, and causality constraints;
-- side-effect boundaries and test expectations.
-
-### `BACKLOG.md`
-
-Owns delivery state:
-
-- atomic PR tickets;
-- dependencies and parallel lanes;
-- exact requirement/acceptance pairing;
-- branch, commit, status, and merge traceability.
-
-### Synchronization Rule
-
-A change is not complete if `main` contains code or backlog contracts that conflict with these sidecars.
-
-Any PR changing one or more of the following must update the relevant sidecar(s) in the **same PR**:
-
-```text
-repository scope
-series registry
-provider/source mapping
-physical lake layout
-Bronze/Silver/Gold contracts
-Gold build/version/manifest/publication/retention semantics
-state/operational manifests
-bootstrap/delta semantics
-revision behavior
-missing-data behavior
-feature semantics
-package boundaries
-runtime/CLI behavior
-quality guarantees
-```
-
-Documentation-only corrections may update the sidecars without code changes, but they must not invent executable behavior that does not exist on `main`.
-
-## Relationship To crypto-history-loader
-
-`SergejSchweizer/crypto-history-loader` is the design reference for medallion ownership, deterministic Parquet-lake behavior, explicit dataset contracts, restart safety, and narrow package boundaries.
-
-`market-regime-loader` intentionally does **not** copy crypto-specific complexity such as minute/tick grids, exchange instruments, options surfaces, or daily per-tick partitions. This repository operates on low-frequency daily macro/volatility series, uses monthly Bronze/Silver partitions, and publishes compact immutable Gold snapshots through a dataset-local manifest.
-
-## Current Implementation Status
-
-At this stage, architecture and delivery contracts exist before production code. `BACKLOG.md` defines the implementation order. The versioned Gold publication model described here is a planned contract until its corresponding PRs are merged. This file must be updated as planned contracts become implemented or if the architecture changes during delivery.
+`market-regime-loader` intentionally does not copy crypto-specific minute/tick grids, exchange instrument structures, options surfaces, or high-frequency partitioning. Its source cadence is daily, but its Gold temporal schema is deliberately compatible with the reference repository.
