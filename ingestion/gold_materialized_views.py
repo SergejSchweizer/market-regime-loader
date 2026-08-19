@@ -110,16 +110,15 @@ class GoldMaterializedViewWriter:
 
     def _physical_paths(self, record: GoldCatalogRecord) -> tuple[Path, Path, Path]:
         build_id = record.build_id
-        expected_rel = (
-            f"versions/build_id={build_id}/data.parquet",
-            f"versions/build_id={build_id}/manifest.json",
-            f"versions/build_id={build_id}/feature_profile.png",
-        )
+        data_rel = f"versions/build_id={build_id}/data.parquet"
+        manifest_rel = f"versions/build_id={build_id}/manifest.json"
+        plot_rel = f"versions/build_id={build_id}/feature_profile.png"
+        expected_rel = (data_rel, manifest_rel, plot_rel)
         actual_rel = (record.data_path, record.build_manifest_path, record.plot_path)
         if actual_rel != expected_rel:
             raise ValueError("Gold current catalog artifact path shape mismatch")
         root = self._paths.gold_dataset_root()
-        physical = tuple(root / path for path in expected_rel)
+        physical = (root / data_rel, root / manifest_rel, root / plot_rel)
         build_root = self._paths.gold_build_root(build_id)
         if any(path.parent != build_root for path in physical):
             raise ValueError("Gold current artifact escapes expected build directory")
