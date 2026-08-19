@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
 from pathlib import Path
 
 import polars as pl
@@ -12,19 +11,21 @@ from application.planner import OperationMode
 from application.state import IngestionState
 from ingestion.parquet_repository import atomic_write_parquet
 
-STATE_SCHEMA: dict[str, pl.DataType] = {
-    "provider": pl.String,
-    "series_id": pl.String,
-    "last_success_utc": pl.Datetime("us", "UTC"),
-    "last_observed_date": pl.Date,
-    "last_requested_start": pl.Date,
-    "last_requested_end": pl.Date,
-    "mode": pl.String,
-    "fetched_row_count": pl.Int64,
-    "accepted_row_count": pl.Int64,
-    "changed_row_count": pl.Int64,
-    "last_reconcile_utc": pl.Datetime("us", "UTC"),
-}
+STATE_SCHEMA = pl.Schema(
+    {
+        "provider": pl.String,
+        "series_id": pl.String,
+        "last_success_utc": pl.Datetime("us", "UTC"),
+        "last_observed_date": pl.Date,
+        "last_requested_start": pl.Date,
+        "last_requested_end": pl.Date,
+        "mode": pl.String,
+        "fetched_row_count": pl.Int64,
+        "accepted_row_count": pl.Int64,
+        "changed_row_count": pl.Int64,
+        "last_reconcile_utc": pl.Datetime("us", "UTC"),
+    }
+)
 
 
 def _row(state: IngestionState) -> dict[str, object]:
@@ -63,7 +64,7 @@ def read_states(path: Path) -> list[IngestionState]:
     if not path.is_file():
         return []
     frame = pl.read_parquet(path)
-    if frame.schema != pl.Schema(STATE_SCHEMA):
+    if frame.schema != STATE_SCHEMA:
         raise ValueError("invalid ingestion-state schema")
     result: list[IngestionState] = []
     for row in frame.iter_rows(named=True):
