@@ -48,10 +48,14 @@ def observation_bounds(
         schema = pl.read_parquet_schema(path)
         if date_column not in schema:
             raise ValueError(f"date column missing from {path}: {date_column}")
-        bounds = pl.scan_parquet(path).select(
-            pl.col(date_column).min().alias("minimum"),
-            pl.col(date_column).max().alias("maximum"),
-        ).collect()
+        bounds = (
+            pl.scan_parquet(path)
+            .select(
+                pl.col(date_column).min().alias("minimum"),
+                pl.col(date_column).max().alias("maximum"),
+            )
+            .collect()
+        )
         minimum = bounds.item(0, "minimum")
         maximum = bounds.item(0, "maximum")
         if minimum is not None:
@@ -89,9 +93,7 @@ def _ensure_unique(frame: pl.DataFrame, key: Sequence[str], *, label: str) -> No
         raise ValueError(f"duplicate natural keys in {label}")
 
 
-def diff_frames(
-    existing: pl.DataFrame, incoming: pl.DataFrame, *, key: Sequence[str]
-) -> FrameDiff:
+def diff_frames(existing: pl.DataFrame, incoming: pl.DataFrame, *, key: Sequence[str]) -> FrameDiff:
     """Classify incoming rows as inserts, unchanged observations, or revisions."""
     _ensure_unique(incoming, key, label="incoming")
     _ensure_unique(existing, key, label="existing")
@@ -104,27 +106,18 @@ def diff_frames(
         return FrameDiff(incoming.clone(), empty, empty)
 
     payload_columns = [column for column in incoming.columns if column not in key]
-    old = existing.rename({column: f"__old_{column}" for column in payload_columns})
+    old = existing.with_columns(pl.lit(True).alias("__exists")).rename(
+        {column: f"__old_{column}" for column in payload_columns}
+    )
     joined = incoming.with_row_index("__order").join(old, on=list(key), how="left")
-
-    old_key_probe = f"__old_{payload_columns[0]}" if payload_columns else None
-    if old_key_probe is None:
-        existing_keys = existing.select(list(key)).with_columns(pl.lit(True).alias("__exists"))
-        joined = incoming.with_row_index("__order").join(
-            existing_keys, on=list(key), how="left"
+    exists = pl.col("__exists").fill_null(False)
+    equal_payload = (
+        pl.all_horizontal(
+            [pl.col(column).eq_missing(pl.col(f"__old_{column}")) for column in payload_columns]
         )
-        exists = pl.col("__exists").fill_null(False)
-        equal_payload = pl.lit(True)
-    else:
-        exists = pl.any_horizontal(
-            [pl.col(f"__old_{column}").is_not_null() for column in payload_columns]
-        )
-        equal_payload = pl.all_horizontal(
-            [
-                pl.col(column).eq_missing(pl.col(f"__old_{column}"))
-                for column in payload_columns
-            ]
-        )
+        if payload_columns
+        else pl.lit(True)
+    )
 
     original_columns = incoming.columns
     inserts = joined.filter(~exists).sort("__order").select(original_columns)
@@ -199,8 +192,7 @@ def upsert_monthly(
         sample_date = date(year, month, 1)
         destination = path_for_date(sample_date)
         month_frame = merged.filter(
-            (pl.col(date_column).dt.year() == year)
-            & (pl.col(date_column).dt.month() == month)
+            (pl.col(date_column).dt.year() == year) & (pl.col(date_column).dt.month() == month)
         )
         atomic_write_parquet(month_frame, destination)
         written.append(destination)
