@@ -229,7 +229,12 @@ def test_provider_failure_preserves_isolated_bronze_and_stops_before_silver_gold
     pipeline, _, silver, publisher, retention, inventory = _pipeline(bronze=bronze)
     with pytest.raises(ProviderBatchError, match="us_10y"):
         pipeline.run_daily(["us_2y", "us_10y"], today=TODAY)
-    assert [item.series_id for item in bronze.run_many(["us_2y"], operation=OperationMode.UPDATE, today=TODAY).successes] == ["us_2y"]
+    assert [
+        item.series_id
+        for item in bronze.run_many(
+            ["us_2y"], operation=OperationMode.UPDATE, today=TODAY
+        ).successes
+    ] == ["us_2y"]
     assert silver.build_calls == []
     assert publisher.publish_count == 0
     assert retention.calls == 0
