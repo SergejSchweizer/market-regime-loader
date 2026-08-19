@@ -22,6 +22,7 @@ from application.gold_retention import GoldRetentionService
 from application.gold_sidecars import GoldSidecarBuilder
 from application.paths import LakePaths
 from application.planner import PlannerConfig
+from application.ports.market_data import MarketDataProvider
 from application.registry import SERIES_REGISTRY
 from ingestion.bronze_uow import FilesystemBronzeUnitOfWork
 from ingestion.cboe_provider import CboeProvider
@@ -45,6 +46,8 @@ EXIT_INPUT = 2
 EXIT_PROVIDER = 10
 EXIT_PIPELINE = 20
 _SOURCE_COMMANDS = frozenset({"bootstrap", "update", "reconcile", "run-daily"})
+_GOLD_COMMANDS = frozenset({"gold-build", "run-daily"})
+_UNUSED_GIT_IDENTITY = "0" * 40
 
 
 class JsonEventSink:
@@ -159,7 +162,7 @@ def build_runtime(
     if Provider.FRED in required and not fred_api_key:
         transport.close()
         raise ValueError("FRED_API_KEY is required for selected FRED source series")
-    providers = {
+    providers: dict[Provider, MarketDataProvider] = {
         Provider.CBOE: CboeProvider(transport),
         Provider.STOXX: StoxxProvider(transport),
         Provider.YAHOO: YahooMoveProvider(transport),
@@ -178,7 +181,7 @@ def build_runtime(
     silver = SilverSeriesRepository(paths)
     inventory = InventoryRefreshService(paths)
 
-    git_hash = _git_commit_hash()
+    git_hash = _git_commit_hash() if command in _GOLD_COMMANDS else _UNUSED_GIT_IDENTITY
     build_store = GoldBuildStore(paths)
     sidecar_store = GoldSidecarStore(
         paths,
