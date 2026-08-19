@@ -136,11 +136,16 @@ def _silver_signature(series_id: str, frame: pl.DataFrame) -> SilverInputSignatu
     )
 
 
-def _input_signatures(silver_by_series: Mapping[str, pl.DataFrame]) -> tuple[SilverInputSignature, ...]:
+def _input_signatures(
+    silver_by_series: Mapping[str, pl.DataFrame],
+) -> tuple[SilverInputSignature, ...]:
     missing = [series_id for series_id in GOLD_SOURCE_SERIES if series_id not in silver_by_series]
     if missing:
         raise KeyError(f"missing Silver provenance inputs: {', '.join(missing)}")
-    return tuple(_silver_signature(series_id, silver_by_series[series_id]) for series_id in GOLD_SOURCE_SERIES)
+    return tuple(
+        _silver_signature(series_id, silver_by_series[series_id])
+        for series_id in GOLD_SOURCE_SERIES
+    )
 
 
 def assemble_gold_frame(
