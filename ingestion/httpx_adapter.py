@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -32,7 +31,8 @@ class TimeoutConfig:
         )
 
 
-TransportFactory = Callable[[], httpx.BaseTransport | None]
+def _sleep(seconds: float) -> None:
+    time.sleep(seconds)
 
 
 def _safe_request_path(url: str) -> str:
@@ -60,7 +60,7 @@ class HttpxTransport:
         *,
         timeout: TimeoutConfig = TimeoutConfig(),
         retry_policy: RetryPolicy = RetryPolicy(),
-        sleeper: Sleeper = time.sleep,
+        sleeper: Sleeper = _sleep,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._timeout = timeout
