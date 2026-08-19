@@ -6,6 +6,11 @@ import pytest
 
 from scripts import validate_git_contract as contract
 
+SYNTHETIC_MERGE = (
+    "Merge e1d6923e430497b98c02b899d186a3f0cb2641f0 "
+    "into b507f00042a6be7cea802d42c65d1cf62d083d4a"
+)
+
 
 def test_branch_pr_id_accepts_canonical_branch() -> None:
     assert contract.branch_pr_id("pr-06/cboe-volatility-provider") == "pr-06"
@@ -57,10 +62,7 @@ def test_validate_contract_validates_all_subjects() -> None:
 def test_validate_contract_skips_synthetic_pr_merge_subject() -> None:
     contract.validate_contract(
         "pr-01/repository-bootstrap-quality-gates",
-        [
-            "Merge e1d6923e430497b98c02b899d186a3f0cb2641f0 into b507f00042a6be7cea802d42c65d1cf62d083d4a",
-            "fix(pr-01): ignore synthetic pull request merge commits",
-        ],
+        [SYNTHETIC_MERGE, "fix(pr-01): ignore synthetic pull request merge commits"],
         event="pull_request",
     )
 
@@ -69,9 +71,7 @@ def test_validate_contract_does_not_skip_arbitrary_merge_subject_locally() -> No
     with pytest.raises(ValueError):
         contract.validate_contract(
             "pr-01/repository-bootstrap-quality-gates",
-            [
-                "Merge e1d6923e430497b98c02b899d186a3f0cb2641f0 into b507f00042a6be7cea802d42c65d1cf62d083d4a"
-            ],
+            [SYNTHETIC_MERGE],
             event="local",
         )
 
