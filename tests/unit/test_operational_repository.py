@@ -7,8 +7,12 @@ import polars as pl
 import pytest
 
 from application.contracts import Provider
-from application.operational_records import IngestionRunRecord, InventoryRecord, RunStatus
-from application.planner import OperationMode
+from application.operational_records import (
+    IngestionRunRecord,
+    InventoryRecord,
+    RunMode,
+    RunStatus,
+)
 from ingestion.operational_repository import (
     INVENTORY_SCHEMA,
     RUN_SCHEMA,
@@ -49,7 +53,7 @@ def run(
         run_id=run_id,
         provider=Provider.FRED,
         series_id="us_10y",
-        mode=OperationMode.UPDATE,
+        mode=RunMode.UPDATE,
         requested_start=date(2026, 8, 11),
         requested_end=date(2026, 8, 19),
         fetched_rows=7,
@@ -115,8 +119,20 @@ def test_inventory_bad_schema_is_rejected(tmp_path: Path) -> None:
 def test_run_record_validates_identity_counts_times_and_failed_durability() -> None:
     with pytest.raises(ValueError, match="run_id"):
         IngestionRunRecord(
-            " ", Provider.FRED, "x", OperationMode.UPDATE, None, None, 0, 0, 0, 0, 0,
-            RunStatus.SUCCESS, START, END,
+            " ",
+            Provider.FRED,
+            "x",
+            RunMode.UPDATE,
+            None,
+            None,
+            0,
+            0,
+            0,
+            0,
+            0,
+            RunStatus.SUCCESS,
+            START,
+            END,
         )
     with pytest.raises(ValueError, match="counts"):
         run(inserted=-1)
@@ -181,7 +197,7 @@ def test_run_upsert_replaces_same_id_and_preserves_other_ids(tmp_path: Path) -> 
         run_id="run-1",
         provider=Provider.FRED,
         series_id="us_10y",
-        mode=OperationMode.UPDATE,
+        mode=RunMode.UPDATE,
         requested_start=date(2026, 8, 12),
         requested_end=date(2026, 8, 19),
         fetched_rows=2,
