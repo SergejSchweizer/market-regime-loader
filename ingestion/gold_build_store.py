@@ -71,10 +71,10 @@ class GoldBuildStore:
         return value.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
 
     def build_dir(self, build_id: str) -> Path:
-        return self._paths.gold_build_dir(build_id)
+        return self._paths.gold_build_root(build_id)
 
     def data_path(self, build_id: str) -> Path:
-        return self._paths.gold_build_data(build_id)
+        return self._paths.gold_data(build_id)
 
     def create(self, frame: pl.DataFrame, *, build_id: str | None = None) -> GoldBuildArtifact:
         """Create exactly one immutable build; an existing build id is a hard collision."""
@@ -83,8 +83,7 @@ class GoldBuildStore:
         self._validate_build_id(resolved_id)
         build_dir = self.build_dir(resolved_id)
         data_path = self.data_path(resolved_id)
-        versions_dir = build_dir.parent
-        versions_dir.mkdir(parents=True, exist_ok=True)
+        build_dir.parent.mkdir(parents=True, exist_ok=True)
         try:
             os.mkdir(build_dir)
         except FileExistsError as exc:
@@ -114,7 +113,7 @@ class GoldBuildStore:
             reread = pl.read_parquet(data_path)
             self._validate_frame(reread)
             if hashlib.sha256(data_path.read_bytes()).hexdigest() != data_sha256:
-                raise IOError("Gold data SHA-256 mismatch after durable write")
+                raise OSError("Gold data SHA-256 mismatch after durable write")
             timestamps = reread.get_column("timestamp_m1")
             minimum = timestamps.min()
             maximum = timestamps.max()
