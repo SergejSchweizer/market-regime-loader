@@ -179,7 +179,9 @@ class GoldPublisher:
             record for record in registered if record.build_id == candidate.build_id
         ]
         if len(building_matches) != 1:
-            raise ValueError("Gold candidate build_id does not match exactly one registered attempt")
+            raise ValueError(
+                "Gold candidate build_id does not match exactly one registered attempt"
+            )
         attempt = building_matches[0]
         if attempt.status is not GoldBuildStatus.BUILDING or attempt.current:
             raise ValueError("Gold candidate attempt is not a non-current building row")
