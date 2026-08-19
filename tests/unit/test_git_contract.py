@@ -66,7 +66,9 @@ def test_validate_contract_rejects_empty_subjects() -> None:
 
 def test_git_subjects_reads_non_empty_lines(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_run(*args: object, **kwargs: object) -> CompletedProcess[str]:
-        return CompletedProcess(args=[], returncode=0, stdout="feat(pr-01): add thing\n\n", stderr="")
+        return CompletedProcess(
+            args=[], returncode=0, stdout="feat(pr-01): add thing\n\n", stderr=""
+        )
 
     monkeypatch.setattr(contract.subprocess, "run", fake_run)
     assert contract.git_subjects("origin/main") == ["feat(pr-01): add thing"]
