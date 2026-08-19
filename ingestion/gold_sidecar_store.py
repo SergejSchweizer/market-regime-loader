@@ -12,13 +12,9 @@ from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-
-import polars as pl  # noqa: E402
-from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
-from matplotlib.figure import Figure  # noqa: E402
+import polars as pl
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.figure import Figure
 
 from application.gold_frame import GOLD_COLUMNS
 from application.gold_sidecars import (
@@ -67,8 +63,7 @@ def feature_profile_data(frame: pl.DataFrame) -> tuple[tuple[str, ...], tuple[fl
         raise ValueError("Gold feature profile requires exact canonical column order")
     denominator = max(frame.height, 1)
     coverage = tuple(
-        (frame.height - frame.get_column(column).null_count()) / denominator
-        for column in features
+        (frame.height - frame.get_column(column).null_count()) / denominator for column in features
     )
     return features, coverage
 
@@ -87,7 +82,10 @@ def _profile_png(frame: pl.DataFrame) -> bytes:
     axis.set_xticklabels(features, rotation=90, fontsize=6)
     figure.tight_layout()
     buffer = BytesIO()
-    canvas.print_png(buffer, metadata={"Software": "market-regime-loader"})
+    canvas.print_png(  # type: ignore[no-untyped-call]
+        buffer,
+        metadata={"Software": "market-regime-loader"},
+    )
     return buffer.getvalue()
 
 
