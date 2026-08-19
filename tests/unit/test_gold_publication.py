@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import polars as pl
@@ -123,14 +123,17 @@ class FakeBundle:
 
 
 class FakeViews:
-    def __init__(self, *, fail_on_current: bool = False, fail_always: bool = False) -> None:
-        self.fail_on_current = fail_on_current
-        self.fail_always = fail_always
+    def __init__(self) -> None:
         self.snapshots: list[list[GoldCatalogRecord]] = []
 
     def refresh(self, records: list[GoldCatalogRecord]) -> None:
         self.snapshots.append(list(records))
-        if self.fail_always or (self.fail_on_current and any(record.current for record in records)):
+
+
+class FailSecondRefresh(FakeViews):
+    def refresh(self, records: list[GoldCatalogRecord]) -> None:
+        super().refresh(records)
+        if len(self.snapshots) == 2:
             raise OSError("injected view refresh failure")
 
 
@@ -164,7 +167,7 @@ def test_bundle_or_precommit_view_failure_finalizes_attempt_without_changing_old
     old = _complete("20260818T020000Z")
     for bundle, views, match in (
         (FakeBundle(fail=True), FakeViews(), "bundle failure"),
-        (FakeBundle(), FakeViews(fail_always=True), "view refresh failure"),
+        (FakeBundle(), FailSecondRefresh(), "view refresh failure"),
     ):
         catalog = FakeCatalog([old])
         publisher = GoldPublisher(catalog, bundle, views, clock=lambda: START)
@@ -223,15 +226,16 @@ def test_postcommit_view_failure_never_rolls_back_promoted_catalog() -> None:
     )
     with pytest.raises(OSError, match="post-commit"):
         publisher.publish(_frame())
-    assert [record.build_id for record in catalog.records if record.current] == [
-        "20260819T020000Z"
-    ]
-    assert next(
-        record for record in catalog.records if record.build_id == "20260819T020000Z"
-    ).status is GoldBuildStatus.COMPLETE
+    assert [record.build_id for record in catalog.records if record.current] == ["20260819T020000Z"]
+    assert (
+        next(record for record in catalog.records if record.build_id == "20260819T020000Z").status
+        is GoldBuildStatus.COMPLETE
+    )
 
 
-def test_reconcile_marks_stale_noncurrent_building_failed_without_inferring_filesystem_state() -> None:
+def test_reconcile_marks_stale_noncurrent_building_failed_without_inferring_filesystem_state() -> (
+    None
+):
     old = _complete("20260818T020000Z")
     stale = _building("20260819T010000Z")
     catalog = FakeCatalog([old, stale])
