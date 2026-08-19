@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import polars as pl
@@ -23,7 +23,6 @@ from ingestion.operational_repository import (
     write_runs,
 )
 
-UTC = timezone.utc
 START = datetime(2026, 8, 19, 2, tzinfo=UTC)
 END = datetime(2026, 8, 19, 2, 1, tzinfo=UTC)
 
