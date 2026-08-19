@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Protocol, Sequence
+from typing import Protocol
 
 import polars as pl
 
