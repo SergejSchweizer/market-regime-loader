@@ -132,7 +132,12 @@ def test_building_failed_and_already_pruned_rows_are_not_new_mark_candidates() -
         plot_path=None,
         pruned_at_utc=START,
     )
-    records = [*complete, _noncomplete(1, GoldBuildStatus.BUILDING), _noncomplete(2, GoldBuildStatus.FAILED), pruned]
+    records = [
+        *complete,
+        _noncomplete(1, GoldBuildStatus.BUILDING),
+        _noncomplete(2, GoldBuildStatus.FAILED),
+        pruned,
+    ]
     assert GoldRetentionPolicy().select_for_mark(records) == (complete[0].build_id,)
 
 
@@ -141,7 +146,9 @@ def test_mark_happens_before_sweep_and_resolver_never_selects_marked_row() -> No
     catalog = FakeCatalog(records)
     views = FakeViews()
     sweeper = AssertingSweeper(catalog)
-    service = GoldRetentionService(catalog, sweeper, views, clock=lambda: START + timedelta(hours=1))
+    service = GoldRetentionService(
+        catalog, sweeper, views, clock=lambda: START + timedelta(hours=1)
+    )
     result = service.run()
     assert result.marked_build_ids == (records[0].build_id,)
     assert result.swept_build_ids == (records[0].build_id,)
@@ -158,7 +165,9 @@ def test_sweep_failure_keeps_catalog_tombstone_and_retry_is_idempotent() -> None
     catalog = FakeCatalog(records)
     views = FakeViews()
     failing = AssertingSweeper(catalog, fail=True)
-    service = GoldRetentionService(catalog, failing, views, clock=lambda: START + timedelta(hours=1))
+    service = GoldRetentionService(
+        catalog, failing, views, clock=lambda: START + timedelta(hours=1)
+    )
     with pytest.raises(OSError, match="sweep failure"):
         service.run()
     marked = next(record for record in catalog.records if record.build_id == records[0].build_id)
