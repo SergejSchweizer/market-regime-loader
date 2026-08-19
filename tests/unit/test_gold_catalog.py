@@ -41,8 +41,12 @@ def _record(
         completed_at_utc=completed,
         schema_version=schema_version,
         feature_version=feature_version,
-        min_timestamp=datetime(2026, 8, 1, tzinfo=UTC) if status is GoldBuildStatus.COMPLETE else None,
-        max_timestamp=datetime(2026, 8, 19, tzinfo=UTC) if status is GoldBuildStatus.COMPLETE else None,
+        min_timestamp=datetime(2026, 8, 1, tzinfo=UTC)
+        if status is GoldBuildStatus.COMPLETE
+        else None,
+        max_timestamp=datetime(2026, 8, 19, tzinfo=UTC)
+        if status is GoldBuildStatus.COMPLETE
+        else None,
         row_count=19 if status is GoldBuildStatus.COMPLETE else None,
         data_path=f"versions/build_id={build_id}/data.parquet" if paths else None,
         build_manifest_path=f"versions/build_id={build_id}/manifest.json" if paths else None,
@@ -102,20 +106,32 @@ def test_strict_current_requires_one_compatible_selectable_complete_current() ->
     with pytest.raises(LookupError, match="not compatible"):
         STRICT_CURRENT.resolve([old, replace(current, schema_version=2)], COMPAT)
     with pytest.raises(LookupError, match="not a selectable"):
-        STRICT_CURRENT.resolve([old, replace(current, data_path=None, build_manifest_path=None, plot_path=None)], COMPAT)
+        STRICT_CURRENT.resolve(
+            [old, replace(current, data_path=None, build_manifest_path=None, plot_path=None)],
+            COMPAT,
+        )
 
 
-def test_latest_compatible_prefers_valid_current_then_newest_completed_with_build_id_tie_break() -> None:
-    valid_current = _record("20260817T020000Z", current=True, completed=START - timedelta(days=2))
+def test_latest_compatible_prefers_valid_current_then_newest_completed_with_build_id_tie_break() -> (
+    None
+):
+    valid_current = _record(
+        "20260817T020000Z",
+        current=True,
+        completed=START - timedelta(days=2),
+    )
     newer = _record("20260819T020000Z", completed=START)
     assert LATEST_COMPATIBLE.resolve([valid_current, newer], COMPAT) == valid_current
 
     incompatible_current = replace(valid_current, schema_version=2)
     same_completed_a = _record("20260818T020000Z", completed=START)
     same_completed_b = _record("20260819T020000Z", completed=START)
-    assert LATEST_COMPATIBLE.resolve(
-        [incompatible_current, same_completed_a, same_completed_b], COMPAT
-    ) == same_completed_b
+    assert (
+        LATEST_COMPATIBLE.resolve(
+            [incompatible_current, same_completed_a, same_completed_b], COMPAT
+        )
+        == same_completed_b
+    )
 
 
 def test_building_failed_pruned_and_incomplete_rows_are_never_selectable() -> None:
@@ -166,7 +182,18 @@ def test_repository_validation_rejects_invalid_semantic_states(tmp_path: Path) -
             ]
         )
     with pytest.raises(ValueError, match="cannot be current"):
-        repo.replace([replace(complete, current=True, pruned_at_utc=START, data_path=None, build_manifest_path=None, plot_path=None)])
+        repo.replace(
+            [
+                replace(
+                    complete,
+                    current=True,
+                    pruned_at_utc=START,
+                    data_path=None,
+                    build_manifest_path=None,
+                    plot_path=None,
+                )
+            ]
+        )
     with pytest.raises(ValueError, match="row_count"):
         repo.replace([replace(complete, row_count=-1)])
     with pytest.raises(ValueError, match="cannot precede"):
