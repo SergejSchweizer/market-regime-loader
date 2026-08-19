@@ -84,9 +84,7 @@ def test_retry_policy_validation_status_and_delays() -> None:
         RetryPolicy(multiplier=0.5)
     with pytest.raises(ValueError):
         RetryPolicy(max_delay_seconds=-1)
-    policy = RetryPolicy(
-        max_attempts=4, initial_delay_seconds=1, multiplier=2, max_delay_seconds=3
-    )
+    policy = RetryPolicy(max_attempts=4, initial_delay_seconds=1, multiplier=2, max_delay_seconds=3)
     assert policy.retryable_status(429)
     assert policy.retryable_status(503)
     assert not policy.retryable_status(404)
