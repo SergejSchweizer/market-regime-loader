@@ -11,6 +11,8 @@ Before changing code, read in this order:
 3. `README.md` — operator/consumer contract.
 4. This file — implementation behavior for agents.
 
+For scheduling, each PR's explicit `Depends on:` field is authoritative. The PR graph is a visualization only; if a diagram and a `Depends on:` field ever disagree, do not infer a dependency from the diagram. Fix the documentation ambiguity before implementation.
+
 If documents conflict, stop and fix the documentation contract in the current PR instead of guessing.
 
 ## One agent task = one backlog PR
