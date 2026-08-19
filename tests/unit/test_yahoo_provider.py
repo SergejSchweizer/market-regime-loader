@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, time, timedelta
 import json
+from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
 
