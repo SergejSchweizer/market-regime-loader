@@ -257,7 +257,8 @@ def main(
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
-        return int(exc.code)
+        code = exc.code
+        return code if isinstance(code, int) else EXIT_INPUT
 
     series = tuple(getattr(args, "series", []))
     runtime: Runtime | None = None
