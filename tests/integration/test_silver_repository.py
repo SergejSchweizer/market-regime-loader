@@ -76,7 +76,10 @@ def test_revision_touches_only_one_month_and_noop_preserves_files(tmp_path: Path
     assert _hash(july) == july_hash
     assert july.stat().st_mtime_ns == july_mtime
     assert _hash(august) != august_hash
-    assert repo.read(contract).filter(pl.col("observation_date") == date(2026, 8, 19)).item(0, "value") == 9.9
+    assert (
+        repo.read(contract).filter(pl.col("observation_date") == date(2026, 8, 19)).item(0, "value")
+        == 9.9
+    )
 
 
 def test_building_selected_series_does_not_touch_other_silver_series(tmp_path: Path) -> None:
