@@ -112,9 +112,7 @@ def test_strict_current_requires_one_compatible_selectable_complete_current() ->
         )
 
 
-def test_latest_compatible_prefers_valid_current_then_newest_completed_with_build_id_tie_break() -> (
-    None
-):
+def test_latest_compatible_prefers_current_then_newest_with_tie_break() -> None:
     valid_current = _record(
         "20260817T020000Z",
         current=True,
