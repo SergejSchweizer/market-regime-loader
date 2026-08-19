@@ -6,9 +6,13 @@ import pytest
 
 from scripts import validate_git_contract as contract
 
-SYNTHETIC_MERGE = (
-    "Merge e1d6923e430497b98c02b899d186a3f0cb2641f0 "
-    "into b507f00042a6be7cea802d42c65d1cf62d083d4a"
+SYNTHETIC_MERGE = " ".join(
+    [
+        "Merge",
+        "e1d6923e430497b98c02b899d186a3f0cb2641f0",
+        "into",
+        "b507f00042a6be7cea802d42c65d1cf62d083d4a",
+    ]
 )
 
 
