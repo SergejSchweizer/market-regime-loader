@@ -46,9 +46,12 @@ def _validate_record(record: GoldCatalogRecord) -> None:
         raise ValueError("row_count cannot be negative")
     if record.completed_at_utc is not None and record.completed_at_utc < record.started_at_utc:
         raise ValueError("completed_at_utc cannot precede started_at_utc")
-    if record.min_timestamp is not None and record.max_timestamp is not None:
-        if record.max_timestamp < record.min_timestamp:
-            raise ValueError("max_timestamp cannot precede min_timestamp")
+    if (
+        record.min_timestamp is not None
+        and record.max_timestamp is not None
+        and record.max_timestamp < record.min_timestamp
+    ):
+        raise ValueError("max_timestamp cannot precede min_timestamp")
     paths = (record.data_path, record.build_manifest_path, record.plot_path)
     present = [path is not None for path in paths]
     if any(present) and not all(present):
@@ -57,15 +60,18 @@ def _validate_record(record: GoldCatalogRecord) -> None:
         raise ValueError("only a complete Gold build may be current")
     if record.current and record.pruned_at_utc is not None:
         raise ValueError("a pruned Gold build cannot be current")
-    if record.status is GoldBuildStatus.COMPLETE and record.pruned_at_utc is None:
-        if (
+    if (
+        record.status is GoldBuildStatus.COMPLETE
+        and record.pruned_at_utc is None
+        and (
             record.completed_at_utc is None
             or record.row_count is None
             or not record.artifact_paths_complete
-        ):
-            raise ValueError(
-                "unpruned complete Gold build requires completion metadata and all artifact paths"
-            )
+        )
+    ):
+        raise ValueError(
+            "unpruned complete Gold build requires completion metadata and all artifact paths"
+        )
 
 
 def _frame(records: list[GoldCatalogRecord]) -> pl.DataFrame:
