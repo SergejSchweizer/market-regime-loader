@@ -7,7 +7,14 @@ from datetime import date, datetime
 from enum import StrEnum
 
 from application.contracts import Provider
-from application.planner import OperationMode
+
+
+class RunMode(StrEnum):
+    """Persisted source-run operation identity."""
+
+    BOOTSTRAP = "bootstrap"
+    UPDATE = "update"
+    RECONCILE = "reconcile"
 
 
 class RunStatus(StrEnum):
@@ -42,7 +49,7 @@ class IngestionRunRecord:
     run_id: str
     provider: Provider
     series_id: str
-    mode: OperationMode
+    mode: RunMode
     requested_start: date | None
     requested_end: date | None
     fetched_rows: int
