@@ -21,35 +21,19 @@ SILVER_COLUMNS = (
 )
 SILVER_SCHEMA = pl.Schema(
     {
-        "observation_date": pl.Date,
-        "series_id": pl.String,
-        "value": pl.Float64,
-        "open": pl.Float64,
-        "high": pl.Float64,
-        "low": pl.Float64,
-        "close": pl.Float64,
-        "unit": pl.String,
-        "provider": pl.String,
-        "source_id": pl.String,
+        "observation_date": pl.Date(),
+        "series_id": pl.String(),
+        "value": pl.Float64(),
+        "open": pl.Float64(),
+        "high": pl.Float64(),
+        "low": pl.Float64(),
+        "close": pl.Float64(),
+        "unit": pl.String(),
+        "provider": pl.String(),
+        "source_id": pl.String(),
         "fetched_at_utc": pl.Datetime("us", "UTC"),
     }
 )
-
-UNIT_BY_SERIES: dict[str, str] = {
-    "vix": "index",
-    "vix9d": "index",
-    "vix3m": "index",
-    "vix6m": "index",
-    "vix1y": "index",
-    "vstoxx": "index",
-    "move": "index",
-    "ciss": "index",
-    "estr": "percent",
-    "euro_hy_oas": "percent",
-    "us_2y": "percent",
-    "us_10y": "percent",
-    "usd_broad": "index",
-}
 
 
 def _assert_identity(frame: pl.DataFrame, contract: SeriesContract) -> None:
@@ -85,7 +69,7 @@ def _assert_common(frame: pl.DataFrame, contract: SeriesContract) -> None:
     _assert_identity(frame, contract)
     if bool(frame.select(pl.col("observation_date").is_null().any()).item()):
         raise ValueError("Bronze observation_date cannot be null")
-    if bool(frame.select(pl.struct(["series_id", "observation_date"]).is_duplicated().any()).item()):
+    if bool(frame.select(["series_id", "observation_date"]).is_duplicated().any()):
         raise ValueError("Bronze contains duplicate Silver natural keys")
 
 
@@ -102,8 +86,6 @@ def _finite_non_null(frame: pl.DataFrame, columns: tuple[str, ...]) -> None:
 
 def canonicalize_silver(contract: SeriesContract, bronze: pl.DataFrame) -> pl.DataFrame:
     """Map one retained Bronze series to exact deterministic Silver schema."""
-    if contract.series_id not in UNIT_BY_SERIES:
-        raise KeyError(f"missing Silver unit policy for {contract.series_id}")
     if bronze.is_empty() and not bronze.columns:
         return pl.DataFrame(schema=SILVER_SCHEMA)
     _assert_common(bronze, contract)
@@ -117,7 +99,7 @@ def canonicalize_silver(contract: SeriesContract, bronze: pl.DataFrame) -> pl.Da
             pl.col("high").cast(pl.Float64),
             pl.col("low").cast(pl.Float64),
             pl.col("close").cast(pl.Float64),
-            pl.lit(UNIT_BY_SERIES[contract.series_id]).alias("unit"),
+            pl.lit(contract.unit).alias("unit"),
             "provider",
             "source_id",
             "fetched_at_utc",
@@ -132,7 +114,7 @@ def canonicalize_silver(contract: SeriesContract, bronze: pl.DataFrame) -> pl.Da
             pl.lit(None, dtype=pl.Float64).alias("high"),
             pl.lit(None, dtype=pl.Float64).alias("low"),
             pl.lit(None, dtype=pl.Float64).alias("close"),
-            pl.lit(UNIT_BY_SERIES[contract.series_id]).alias("unit"),
+            pl.lit(contract.unit).alias("unit"),
             "provider",
             "source_id",
             "fetched_at_utc",
