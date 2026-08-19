@@ -10,9 +10,9 @@ Last reviewed: 2026-08-19
 
 - One `PR-XX` entry equals one logical implementation pull request.
 - PRs are sized for two weak coding agents working in parallel: one infrastructure boundary, provider family, transformation boundary, publication concern, or operational concern per PR.
-- Every PR has `Status`, `Updated`, `PR`, `Git branch`, `Git status`, `Agent lane`, `Depends on`, and `Commit`.
+- Every PR has `Status`, `Updated`, `PR`, `Git branch`, `Git status`, `Agent lane`, `Depends on`, `Commit`, and `Design patterns`.
 - Delivery statuses: `Planned`, `In Progress`, `Blocked`, `Ready`, `Merged`.
-- Git statuses: `not-started (branch absent)`, `active-clean`, `active-dirty: <paths>`, `pushed-ci-green`, `merged`.
+- Git statuses: `not-started (branch absent)`, `active-clean`, `active-dirty: <paths>`, `pushed-ci-failing`, `pushed-ci-green`, `merged`.
 - Every `Description` requirement `R<n>` has exactly one matching `Acceptance` item `A<n>`. Counts must match.
 - Implement only the selected PR. Do not pull future-PR scope forward.
 - Required unit/integration tests are offline. Live provider tests use `@pytest.mark.network` and are excluded from required gates.
@@ -38,8 +38,11 @@ feat fix docs test refactor perf build ci chore
 Rules:
 
 - Branch and commit scope contain the same `pr-XX` as the backlog entry.
+- Every non-generated commit subject uses Conventional Commit format exactly `type(pr-XX): <description>` with an allowed type and the same PR identifier as the branch.
 - Branch from dependency-complete `main` only after every `Depends on` PR is merged.
+- Before every commit, verify the active branch is exactly the `Git branch` declared by the backlog PR.
 - Before push: required local quality gate passes and `git status --short` is empty.
+- A pushed branch with any failing required remote gate has Git status `pushed-ci-failing`.
 - Before `Ready`: remote `lint`, `type`, `unit`, `integration`, `coverage` are green and Git status is `pushed-ci-green`.
 - Enable PR auto-merge with squash when the PR is ready; protected `main` ensures merge occurs only after the merge gate passes.
 - After merge: update backlog status/PR link/Git status in the next documentation-maintenance change; do not keep an implementation task alive to start another PR.
@@ -100,7 +103,9 @@ merge_group
 
 ## Mandatory Design Patterns
 
-Use patterns only where they reduce coupling; prefer composition/`typing.Protocol` over inheritance.
+Use patterns whenever they materially reduce coupling, clarify lifecycle/ownership, improve substitution in tests, or protect transaction boundaries. Do not introduce a pattern only to satisfy a label; prefer the simplest implementation that satisfies the contract. Prefer composition/`typing.Protocol` over inheritance.
+
+Every PR declares `Design patterns:` explicitly. If no additional pattern is justified beyond the repository architecture, use `Architectural baseline only` rather than inventing one.
 
 - **Ports and Adapters / Hexagonal Architecture** — `application` owns contracts/use cases; `ingestion` implements provider/filesystem adapters.
 - **Adapter** — CBOE/STOXX/Yahoo/ECB/FRED and physical persistence implementations.
@@ -113,6 +118,7 @@ Use patterns only where they reduce coupling; prefer composition/`typing.Protoco
 - **Mark-and-Sweep** — retention tombstones a build in the catalog before physical deletion.
 - **Command** — CLI adapters parse/call/render; no provider/persistence business logic.
 - **Dependency Injection** — clock, sleeper, HTTP client, repositories, provider registry, source-control identity, and policies are injected.
+- **Specification/Policy Object** — governance validators encode repository/backlog invariants as executable rules rather than prose-only conventions.
 
 ## Initial Series Catalog
 
@@ -333,27 +339,31 @@ PR-02 + PR-04 + PR-05
                     PR-14 + PR-21 + PR-22
                               |
                             PR-23
+
+PR-24 governance contract is an orthogonal repository-policy sidecar. It may run in parallel with already-active PR-04/PR-05/PR-11 and must merge before starting any new not-yet-active implementation PR.
 ```
 
 ---
 
 ## PR-01: Bootstrap Repository, Quality Gates, And Git Policy
 
-Status: Planned
+Status: Merged
 
 Updated: 2026-08-19
 
-PR: none
+PR: #2
 
 Git branch: `pr-01/repository-bootstrap-quality-gates`
 
-Git status: `not-started (branch absent)`
+Git status: `merged`
 
 Agent lane: Foundation; one agent only
 
 Depends on: none
 
 Commit: `chore(pr-01): bootstrap repository and quality gates`
+
+Design patterns: Command, Dependency Injection, Ports and Adapters.
 
 Description:
 - R1: Create Python >=3.13 `uv` project; runtime dependencies `polars`, `pyarrow`, `httpx`, `pydantic`, `PyYAML`, `matplotlib`; dev dependencies `pytest`, `pytest-cov`, `coverage`, `ruff`, `mypy`; no production pandas.
@@ -379,21 +389,23 @@ Acceptance:
 
 ## PR-02: Define Registry, Paths, And Adapter Registry Contracts
 
-Status: Planned
+Status: Merged
 
 Updated: 2026-08-19
 
-PR: none
+PR: #3
 
 Git branch: `pr-02/series-registry-lake-contracts`
 
-Git status: `not-started (branch absent)`
+Git status: `merged`
 
 Agent lane: Agent A
 
 Depends on: PR-01
 
 Commit: `feat(pr-02): define series and lake contracts`
+
+Design patterns: Registry/Factory, Value Object, Dependency Injection.
 
 Description:
 - R1: Define immutable typed registry with exactly 13 canonical series and provider/source/unit/shape/frequency/bootstrap/capability metadata.
@@ -411,21 +423,23 @@ Acceptance:
 
 ## PR-03: Implement Polars Lake Repositories And Atomic IO
 
-Status: Planned
+Status: Merged
 
 Updated: 2026-08-19
 
-PR: none
+PR: #4
 
 Git branch: `pr-03/polars-parquet-lake-io`
 
-Git status: `not-started (branch absent)`
+Git status: `merged`
 
 Agent lane: Agent B
 
 Depends on: PR-01
 
 Commit: `feat(pr-03): add polars parquet repositories`
+
+Design patterns: Repository, Adapter, Dependency Injection.
 
 Description:
 - R1: Define narrow repository/IO ports and Polars filesystem adapters for deterministic zero/one/multi monthly reads with caller-key ordering and efficient `min/max observation_date` discovery from authoritative Bronze.
@@ -443,21 +457,23 @@ Acceptance:
 
 ## PR-04: Add Shared HTTP Port, Retry Strategy, And Provider Protocol
 
-Status: Planned
+Status: In Progress
 
 Updated: 2026-08-19
 
-PR: none
+PR: #5
 
 Git branch: `pr-04/shared-http-provider-port`
 
-Git status: `not-started (branch absent)`
+Git status: `pushed-ci-failing`
 
 Agent lane: Agent B
 
 Depends on: PR-01, PR-02
 
 Commit: `feat(pr-04): add shared http provider port`
+
+Design patterns: Ports and Adapters, Adapter, Strategy, Dependency Injection.
 
 Description:
 - R1: Define application-facing HTTP request/response port and `MarketDataProvider` protocol; application imports no `httpx`.
@@ -475,21 +491,23 @@ Acceptance:
 
 ## PR-05: Implement Bootstrap, Strict Delta Update, Explicit Reconcile Planner And State
 
-Status: Planned
+Status: In Progress
 
 Updated: 2026-08-19
 
-PR: none
+PR: #8
 
 Git branch: `pr-05/planner-delta-reconcile-state`
 
-Git status: `not-started (branch absent)`
+Git status: `pushed-ci-failing`
 
 Agent lane: Foundation; first free agent
 
 Depends on: PR-02, PR-03
 
 Commit: `feat(pr-05): add strict delta ingestion planner`
+
+Design patterns: Strategy, Repository, Dependency Injection.
 
 Description:
 - R1: Implement pure planner modes `bootstrap|update|reconcile`; `bootstrap` only when no authoritative Bronze observation exists, `update` for normal existing-history execution, and `reconcile` only when explicitly requested by caller/operator.
@@ -521,9 +539,11 @@ Git status: `not-started (branch absent)`
 
 Agent lane: Agent A
 
-Depends on: PR-02, PR-04, PR-05
+Depends on: PR-02, PR-04, PR-05, PR-24
 
 Commit: `feat(pr-06): ingest cboe volatility indices`
+
+Design patterns: Adapter, Ports and Adapters, Dependency Injection.
 
 Description:
 - R1: Implement one CBOE adapter for registered `vix|vix9d|vix3m|vix6m|vix1y` only through shared provider/HTTP contracts.
@@ -553,9 +573,11 @@ Git status: `not-started (branch absent)`
 
 Agent lane: Agent A
 
-Depends on: PR-02, PR-04, PR-05
+Depends on: PR-02, PR-04, PR-05, PR-24
 
 Commit: `feat(pr-07): ingest vstoxx history`
+
+Design patterns: Adapter, Ports and Adapters, Dependency Injection.
 
 Description:
 - R1: Implement only registered `vstoxx/V2TX` through shared ports.
@@ -585,9 +607,11 @@ Git status: `not-started (branch absent)`
 
 Agent lane: Agent A
 
-Depends on: PR-02, PR-04, PR-05
+Depends on: PR-02, PR-04, PR-05, PR-24
 
 Commit: `feat(pr-08): ingest move index history`
+
+Design patterns: Adapter, Ports and Adapters, Dependency Injection.
 
 Description:
 - R1: Implement isolated Yahoo adapter only for registered `move -> ^MOVE`; no Yahoo-specific behavior outside adapter.
@@ -617,9 +641,11 @@ Git status: `not-started (branch absent)`
 
 Agent lane: Agent B
 
-Depends on: PR-02, PR-04, PR-05
+Depends on: PR-02, PR-04, PR-05, PR-24
 
 Commit: `feat(pr-09): ingest ecb regime series`
+
+Design patterns: Adapter, Ports and Adapters, Dependency Injection.
 
 Description:
 - R1: Implement only registered CISS and ESTR API mappings through shared ports.
@@ -649,9 +675,11 @@ Git status: `not-started (branch absent)`
 
 Agent lane: Agent B
 
-Depends on: PR-02, PR-04, PR-05
+Depends on: PR-02, PR-04, PR-05, PR-24
 
 Commit: `feat(pr-10): ingest fred regime series`
+
+Design patterns: Adapter, Ports and Adapters, Dependency Injection.
 
 Description:
 - R1: Implement exactly registered `DGS2|DGS10|DTWEXBGS|BAMLHE00EHYIOAS` mappings through shared ports.
@@ -671,21 +699,23 @@ Acceptance:
 
 ## PR-11: Add Operational Manifest And Inventory Repositories
 
-Status: Planned
+Status: In Progress
 
 Updated: 2026-08-19
 
-PR: none
+PR: #7
 
 Git branch: `pr-11/bronze-inventory-run-manifests`
 
-Git status: `not-started (branch absent)`
+Git status: `pushed-ci-failing`
 
 Agent lane: Agent B
 
 Depends on: PR-02, PR-03
 
 Commit: `feat(pr-11): add inventory and run manifests`
+
+Design patterns: Repository, Adapter, Dependency Injection.
 
 Description:
 - R1: Define authoritative `dataset_inventory.parquet` snapshot fields `series_id,provider,min_observation_date,max_observation_date,row_count,duplicate_key_count,file_count`.
@@ -715,9 +745,11 @@ Git status: `not-started (branch absent)`
 
 Agent lane: Integration; one agent only
 
-Depends on: PR-03, PR-05, PR-06, PR-07, PR-08, PR-09, PR-10, PR-11
+Depends on: PR-03, PR-05, PR-06, PR-07, PR-08, PR-09, PR-10, PR-11, PR-24
 
 Commit: `feat(pr-12): orchestrate bronze updates`
+
+Design patterns: Registry/Factory, Unit of Work, Repository, Dependency Injection.
 
 Description:
 - R1: Application service resolves series contract and provider via injected registries, planner, repositories; no provider implementation/HTTP imports or provider conditional ladder.
@@ -749,9 +781,11 @@ Git status: `not-started (branch absent)`
 
 Agent lane: Agent A
 
-Depends on: PR-12
+Depends on: PR-12, PR-24
 
 Commit: `feat(pr-13): build canonical silver series`
+
+Design patterns: Repository, Adapter, Dependency Injection.
 
 Description:
 - R1: Registry-driven Silver builder/repository produces exact canonical schema from selected retained Bronze.
@@ -781,9 +815,11 @@ Git status: `not-started (branch absent)`
 
 Agent lane: Agent B
 
-Depends on: PR-11, PR-12
+Depends on: PR-11, PR-12, PR-24
 
 Commit: `feat(pr-14): add lake inventory cli`
+
+Design patterns: Command, Dependency Injection.
 
 Description:
 - R1: Command adapter `inventory` reads inventory repository and renders exactly seven stable fields.
@@ -813,9 +849,11 @@ Git status: `not-started (branch absent)`
 
 Agent lane: Agent A
 
-Depends on: PR-13
+Depends on: PR-13, PR-24
 
 Commit: `feat(pr-15): add volatility regime features`
+
+Design patterns: Strategy for feature policy, Dependency Injection; otherwise functional core.
 
 Description:
 - R1: Convert Silver dates to unique/sorted first-column UTC-midnight `timestamp_m1: Datetime(us,UTC)`; remove `observation_date`; union family source dates only.
@@ -847,9 +885,11 @@ Git status: `not-started (branch absent)`
 
 Agent lane: Agent B
 
-Depends on: PR-13
+Depends on: PR-13, PR-24
 
 Commit: `feat(pr-16): add macro regime features`
+
+Design patterns: Strategy for feature policy, Dependency Injection; otherwise functional core.
 
 Description:
 - R1: Convert Silver to same canonical family timestamp contract; union source dates without fill.
@@ -881,9 +921,11 @@ Git status: `not-started (branch absent)`
 
 Agent lane: Integration; one agent only
 
-Depends on: PR-15, PR-16
+Depends on: PR-15, PR-16, PR-24
 
 Commit: `feat(pr-17): assemble canonical daily gold frame`
+
+Design patterns: Facade, Dependency Injection; functional core for deterministic assembly.
 
 Description:
 - R1: Outer-join feature-family frames only on timestamp; one union row, null preservation, no imputation/as-of carry.
@@ -915,9 +957,11 @@ Git status: `not-started (branch absent)`
 
 Agent lane: Agent A
 
-Depends on: PR-17
+Depends on: PR-17, PR-24
 
 Commit: `feat(pr-18): add immutable gold build store`
+
+Design patterns: Repository, Adapter, Dependency Injection.
 
 Description:
 - R1: Build ID from injected UTC second `YYYYMMDDTHHMMSSZ`; reject non-UTC/malformed/reused build directory.
@@ -949,9 +993,11 @@ Git status: `not-started (branch absent)`
 
 Agent lane: Agent B
 
-Depends on: PR-17
+Depends on: PR-17, PR-24
 
 Commit: `feat(pr-19): add gold catalog and resolution strategies`
+
+Design patterns: Repository, Strategy, Dependency Injection.
 
 Description:
 - R1: Define exact 15-field catalog schema including `pruned_at_utc`; source-controlled semantic versions start `1/1` and never auto-bump.
@@ -983,9 +1029,11 @@ Git status: `not-started (branch absent)`
 
 Agent lane: Agent A
 
-Depends on: PR-18
+Depends on: PR-18, PR-24
 
 Commit: `feat(pr-20): add gold build sidecars`
+
+Design patterns: Builder, Adapter, Dependency Injection.
 
 Description:
 - R1: Generate deterministic creation-only build `manifest.json` with exact artifact concepts: dataset/build identity, `artifact_state="built"`, schema/feature versions, build start/completion timestamps, rows, ordered columns, bounds, data path/SHA, feature-set hash, Git commit hash, plot path. Do not use catalog `building|complete|failed` status.
@@ -1017,9 +1065,11 @@ Git status: `not-started (branch absent)`
 
 Agent lane: Integration; one agent only
 
-Depends on: PR-19, PR-20
+Depends on: PR-19, PR-20, PR-24
 
 Commit: `feat(pr-21): publish gold with catalog state machine`
+
+Design patterns: State Machine, Unit of Work, Materialized View, Repository, Dependency Injection.
 
 Description:
 - R1: Implement publication State Machine: register `building,current=false`; create/validate immutable bundle; on build failure atomically finalize attempted row `failed,current=false`; previous current never changes.
@@ -1053,9 +1103,11 @@ Git status: `not-started (branch absent)`
 
 Agent lane: Foundation; first free agent
 
-Depends on: PR-21
+Depends on: PR-21, PR-24
 
 Commit: `feat(pr-22): add mark and sweep gold retention`
+
+Design patterns: Mark-and-Sweep, Strategy, Repository, Dependency Injection.
 
 Description:
 - R1: Default retain five physical complete builds including current per `(schema_version,feature_version)` pair; deterministic oldest non-current ordering by completed time/build ID.
@@ -1087,9 +1139,11 @@ Git status: `not-started (branch absent)`
 
 Agent lane: Integration; one agent only
 
-Depends on: PR-14, PR-21, PR-22
+Depends on: PR-14, PR-21, PR-22, PR-24
 
 Commit: `feat(pr-23): add delta-only daily medallion pipeline`
+
+Design patterns: Command, Facade/Orchestrator, Unit of Work, Dependency Injection.
 
 Description:
 - R1: Command adapters `bootstrap,update,reconcile,silver-build,gold-build,inventory,run-daily`; parsing/config/render in `api`, use cases in `application`; Gold publish only PR-21 service.
@@ -1113,12 +1167,48 @@ Acceptance:
 - A8 (verifies R8): full bootstrap/delta/revision/window-filter/explicit-reconcile/publication/resolution/retention/no-op scenario passes offline.
 - A9 (verifies R9): README documents delta-only daily execution and optional separate reconciliation; no scheduled CI ingestion exists.
 
+## PR-24: Enforce Backlog Git Metadata And Design-Pattern Governance
+
+Status: In Progress
+
+Updated: 2026-08-19
+
+PR: pending
+
+Git branch: `pr-24/backlog-governance-contracts`
+
+Git status: `active-clean`
+
+Agent lane: Governance; one agent only
+
+Depends on: PR-01
+
+Commit: `chore(pr-24): enforce backlog governance contracts`
+
+Design patterns: Specification/Policy Object, Command validation, Dependency Injection where validation inputs are externalized.
+
+Description:
+- R1: Synchronize all existing PR entries with actual GitHub delivery state and preserve exact `Git branch`, `Git status`, and PR-scoped Conventional Commit metadata.
+- R2: Require every PR entry to declare non-empty `Design patterns`; pattern use is mandatory when it materially improves coupling/testability/lifecycle clarity, but cargo-cult patterns are forbidden.
+- R3: Extend Git status vocabulary with `pushed-ci-failing` so pushed branches with failing required checks are represented truthfully instead of mislabeled active or green.
+- R4: Add an offline executable backlog contract test that parses every `PR-XX` section and rejects missing/duplicate PR IDs, missing Git metadata, branch/commit PR-ID mismatch, invalid Conventional Commit syntax/type, invalid Git status, or missing Design-pattern metadata.
+- R5: Keep `AGENTS.md` synchronized with the executable contract and require exact backlog branch plus PR-scoped Conventional Commits before commit/push.
+
+Acceptance:
+- A1 (verifies R1): PR-01/#2, PR-02/#3, PR-03/#4 are `Merged/merged`; PR-04/#5, PR-05/#8, PR-11/#7 reflect their open pushed state; all planned PRs retain exact declared branches.
+- A2 (verifies R2): every PR-01..PR-24 section contains one non-empty `Design patterns` field and the docs explicitly forbid pattern-for-pattern's-sake implementation.
+- A3 (verifies R3): allowed status tests accept `pushed-ci-failing`, reject unknown states, and reserve `pushed-ci-green` for all-green required remote gates.
+- A4 (verifies R4): parser proves exactly 24 PR sections and all metadata contracts; negative fixtures for missing branch/status/pattern and PR-ID/commit mismatch fail deterministically.
+- A5 (verifies R5): AGENTS and BACKLOG state the same branch/commit/status/pattern rules without contradiction.
+
 ## Definition Of MVP Complete
 
-MVP is complete only when PR-01 through PR-23 are merged and:
+MVP is complete only when PR-01 through PR-24 are merged and:
 
 - `main` is actually protected with the five required checks, squash-only PR merging, auto-merge enabled, and no direct/force/delete path;
 - implementation branches/commits follow the PR Git contract;
+- every backlog PR has explicit Git branch, truthful Git status, PR-scoped Conventional Commit, and Design-pattern metadata;
+- established patterns are applied where they reduce coupling/testability/lifecycle ambiguity, without unnecessary pattern layering;
 - local/remote gates run four execution checks in parallel plus combined production coverage >=90%;
 - application follows documented ports/adapters and no provider conditional ladder leaks into orchestration;
 - first execution bootstraps maximum history only when Bronze is empty;
