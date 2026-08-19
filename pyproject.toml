@@ -1,0 +1,73 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "market-regime-loader"
+version = "0.1.0"
+description = "Reusable daily market-state loader"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+  "polars>=1.32",
+  "pyarrow>=19",
+  "httpx>=0.28",
+  "pydantic>=2.11",
+  "PyYAML>=6.0",
+  "matplotlib>=3.10",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4",
+  "pytest-cov>=6.2",
+  "coverage>=7.10",
+  "ruff>=0.12",
+  "mypy>=1.17",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["application*", "ingestion*", "api*", "scripts*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+  "integration: offline component/integration tests",
+  "network: live provider tests excluded from required gates",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+packages = ["application", "ingestion", "api", "scripts"]
+exclude = ["tests/fixtures", "lake"]
+
+[tool.coverage.run]
+branch = false
+source = ["application", "ingestion", "api", "scripts"]
+omit = [
+  "tests/*",
+  "tests/**/*",
+  "tests/fixtures/*",
+  "tests/fixtures/**/*",
+  "lake/*",
+  "lake/**/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+precision = 2
+exclude_also = [
+  "if TYPE_CHECKING:",
+  "if __name__ == .__main__.:",
+]
