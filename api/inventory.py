@@ -6,7 +6,6 @@ import argparse
 import json
 import sys
 from collections.abc import Callable, Sequence
-from dataclasses import asdict
 from pathlib import Path
 from typing import TextIO
 
@@ -14,6 +13,7 @@ from application.contracts import Provider
 from application.operational_records import InventoryRecord
 from application.paths import LakePaths
 from application.registry import SERIES_REGISTRY
+from ingestion.operational_repository import read_inventory
 
 InventoryReader = Callable[[], Sequence[InventoryRecord]]
 INVENTORY_FIELDS = (
@@ -64,7 +64,6 @@ def _filter_records(
 
 
 def _logical_row(record: InventoryRecord) -> dict[str, object]:
-    raw = asdict(record)
     return {
         "series_id": record.series_id,
         "provider": record.provider.value,
@@ -74,9 +73,9 @@ def _logical_row(record: InventoryRecord) -> dict[str, object]:
         "max_observation_date": None
         if record.max_observation_date is None
         else record.max_observation_date.isoformat(),
-        "row_count": raw["row_count"],
-        "duplicate_key_count": raw["duplicate_key_count"],
-        "file_count": raw["file_count"],
+        "row_count": record.row_count,
+        "duplicate_key_count": record.duplicate_key_count,
+        "file_count": record.file_count,
     }
 
 
@@ -84,16 +83,21 @@ def render_text(records: Sequence[InventoryRecord]) -> str:
     lines = ["\t".join(INVENTORY_FIELDS)]
     for record in records:
         row = _logical_row(record)
-        lines.append("\t".join("" if row[field] is None else str(row[field]) for field in INVENTORY_FIELDS))
+        lines.append(
+            "\t".join("" if row[field] is None else str(row[field]) for field in INVENTORY_FIELDS)
+        )
     return "\n".join(lines) + "\n"
 
 
 def render_json(records: Sequence[InventoryRecord]) -> str:
-    return json.dumps(
-        [_logical_row(record) for record in records],
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ) + "\n"
+    return (
+        json.dumps(
+            [_logical_row(record) for record in records],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
 
 
 def run_inventory(
@@ -119,8 +123,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
     parsed, _ = parser.parse_known_args(args)
-    from ingestion.operational_repository import read_inventory
-
     paths = LakePaths(parsed.lake_root)
     return run_inventory(
         args,
