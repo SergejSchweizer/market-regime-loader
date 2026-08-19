@@ -63,11 +63,7 @@ class FixtureProvider:
         rows = list(self.source[series.series_id])
         if request.operation == "update":
             assert request.logical_start is not None
-            rows = [
-                row
-                for row in rows
-                if request.logical_start <= row[0] <= request.logical_end
-            ]
+            rows = [row for row in rows if request.logical_start <= row[0] <= request.logical_end]
         self.fetch_count += 1
         fetched_at = NOW + timedelta(seconds=self.fetch_count)
         common: dict[str, object] = {
@@ -115,8 +111,7 @@ def _source_data() -> dict[str, list[tuple[date, float]]]:
     result: dict[str, list[tuple[date, float]]] = {}
     for series_index, series_id in enumerate(SERIES_REGISTRY):
         rows = [
-            (start + timedelta(days=index), float(10 + series_index + index))
-            for index in range(60)
+            (start + timedelta(days=index), float(10 + series_index + index)) for index in range(60)
         ]
         if series_id == "us_10y":
             rows.insert(0, (date(2000, 1, 3), 6.5))
@@ -146,7 +141,9 @@ def _stack(
         providers=providers,
         unit_of_work=uow,
         clock=lambda: NOW,
-        run_id_factory=lambda series_id: f"e2e-{series_id}-{len(providers[SERIES_REGISTRY[series_id].provider].requests)}",
+        run_id_factory=lambda series_id: (
+            f"e2e-{series_id}-{len(providers[SERIES_REGISTRY[series_id].provider].requests)}"
+        ),
     )
     silver = SilverSeriesRepository(paths)
     build_times = [NOW + timedelta(seconds=index) for index in range(8)]
@@ -221,7 +218,9 @@ def test_full_offline_daily_delta_reconcile_publication_retention_and_inventory(
     assert us10_provider.requests[0][0] == "us_10y" or any(
         series_id == "us_10y" for series_id, _ in us10_provider.requests
     )
-    bootstrap_us10 = next(request for series_id, request in us10_provider.requests if series_id == "us_10y")
+    bootstrap_us10 = next(
+        request for series_id, request in us10_provider.requests if series_id == "us_10y"
+    )
     assert bootstrap_us10.maximum_history and bootstrap_us10.logical_start is None
 
     july_silver = paths.silver_month("us_10y", date(2026, 7, 15))
@@ -233,9 +232,7 @@ def test_full_offline_daily_delta_reconcile_publication_retention_and_inventory(
     _replace_source_value(source, "us_10y", revision_day, 9.99)
     old_euro_hy_min = source["euro_hy_oas"][0][0]
     _append_next_day(source)
-    source["euro_hy_oas"] = [
-        row for row in source["euro_hy_oas"] if row[0] >= date(2026, 8, 11)
-    ]
+    source["euro_hy_oas"] = [row for row in source["euro_hy_oas"] if row[0] >= date(2026, 8, 11)]
 
     second = pipeline.run_daily([], today=NEXT_TODAY)
     assert second.bronze is not None
@@ -245,20 +242,14 @@ def test_full_offline_daily_delta_reconcile_publication_retention_and_inventory(
     assert all(not result.maximum_history for result in second.bronze.successes)
     assert _sha(july_silver) == july_hash_before
     assert _sha(august_silver) != august_hash_before
-    assert (
-        pl.read_parquet(august_silver)
-        .filter(pl.col("observation_date") == revision_day)
-        .item(0, "value")
-        == pytest.approx(9.99)
-    )
+    assert pl.read_parquet(august_silver).filter(
+        pl.col("observation_date") == revision_day
+    ).item(0, "value") == pytest.approx(9.99)
 
     euro_hy_bronze = sorted(
-        (
-            paths.root
-            / "bronze"
-            / "provider=fred"
-            / "series=euro_hy_oas"
-        ).glob("year=*/month=*/data.parquet")
+        (paths.root / "bronze" / "provider=fred" / "series=euro_hy_oas").glob(
+            "year=*/month=*/data.parquet"
+        )
     )
     euro_hy = pl.concat([pl.read_parquet(path) for path in euro_hy_bronze])
     assert euro_hy.get_column("observation_date").min() == old_euro_hy_min
@@ -318,8 +309,13 @@ def test_full_offline_daily_delta_reconcile_publication_retention_and_inventory(
     assert gold.get_column("timestamp_m1").is_sorted()
     assert gold.get_column("timestamp_m1").is_duplicated().sum() == 0
     assert "observation_date" not in gold.columns
-    assert gold.filter(pl.col("timestamp_m1") == datetime(2026, 8, 19, tzinfo=UTC)).height == 1
-    assert paths.gold_profile().read_bytes() == paths.gold_build_profile(current.build_id).read_bytes()
+    assert (
+        gold.filter(pl.col("timestamp_m1") == datetime(2026, 8, 19, tzinfo=UTC)).height == 1
+    )
+    assert (
+        paths.gold_profile().read_bytes()
+        == paths.gold_build_profile(current.build_id).read_bytes()
+    )
 
     inventory = read_inventory(paths.inventory())
     assert len(inventory) == len(SERIES_REGISTRY)
