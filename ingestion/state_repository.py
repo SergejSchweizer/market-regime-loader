@@ -13,16 +13,16 @@ from ingestion.parquet_repository import atomic_write_parquet
 
 STATE_SCHEMA = pl.Schema(
     {
-        "provider": pl.String,
-        "series_id": pl.String,
+        "provider": pl.String(),
+        "series_id": pl.String(),
         "last_success_utc": pl.Datetime("us", "UTC"),
-        "last_observed_date": pl.Date,
-        "last_requested_start": pl.Date,
-        "last_requested_end": pl.Date,
-        "mode": pl.String,
-        "fetched_row_count": pl.Int64,
-        "accepted_row_count": pl.Int64,
-        "changed_row_count": pl.Int64,
+        "last_observed_date": pl.Date(),
+        "last_requested_start": pl.Date(),
+        "last_requested_end": pl.Date(),
+        "mode": pl.String(),
+        "fetched_row_count": pl.Int64(),
+        "accepted_row_count": pl.Int64(),
+        "changed_row_count": pl.Int64(),
         "last_reconcile_utc": pl.Datetime("us", "UTC"),
     }
 )
