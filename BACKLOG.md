@@ -2,57 +2,68 @@
 
 This backlog is the implementation source of truth for `market-regime-loader`.
 
-The repository loads reusable daily market-state inputs from open/public sources, stores the maximum history exposed by each configured source, and performs restart-safe daily incremental updates. Data is managed with Polars and Parquet using a Bronze -> Silver -> Gold medallion architecture. Gold publication produces immutable Parquet data plus deterministic JSON and PNG sidecars.
+The repository loads reusable daily market-state inputs from open/public sources, preserves/reconciles source history, and publishes deterministic immutable Gold feature snapshots through a Bronze -> Silver -> Gold architecture.
 
-Last reviewed: 2026-08-18
+Last reviewed: 2026-08-19
 
 ## Delivery Policy
 
-- One `PR-XX` entry equals one logical pull request.
-- PRs are intentionally small and explicit for two weak coding agents: one infrastructure boundary, provider family, transformation boundary, publication concern, or operational concern per PR.
-- Every PR has `Status`, `Updated`, `PR`, `Git branch`, `Git status`, `Agent lane`, `Depends on`, and `Commit` metadata.
-- Valid delivery statuses are `Planned`, `In Progress`, `Blocked`, `Ready`, and `Merged`.
-- `Git status` is distinct from delivery status. Planned PRs use `not-started (branch absent)`. Active work must be updated to `active-clean`, `active-dirty: <paths>`, `pushed-ci-green`, or `merged`.
-- Every `Description` requirement has an ID `R1`, `R2`, ... and every `Acceptance` item has the matching `A1`, `A2`, ... . Requirement and acceptance counts must match exactly.
-- No PR may silently add responsibility outside its numbered requirements.
-- Unit and required integration tests are offline. Live-provider tests must use `@pytest.mark.network` and are excluded from all required push/merge gates.
-- Production data under `lake/` is ignored by Git and never committed.
-- Polars is the production dataframe engine. Do not introduce pandas into production code.
-- Parquet is the durable tabular format for Bronze, Silver, Gold, state, catalogs, and inventories. JSON/PNG are Gold sidecars only.
-- Bronze/Silver never synthesize missing market observations. Gold features are causal and use only current/past observations.
-- `README.md` and `ARCHITECTURE.md` are durable implementation sidecars. Any PR changing a documented contract updates the applicable sidecar in the same PR.
+- One `PR-XX` entry equals one logical implementation pull request.
+- PRs are sized for two weak coding agents working in parallel: one infrastructure boundary, provider family, transformation boundary, publication concern, or operational concern per PR.
+- Every PR has `Status`, `Updated`, `PR`, `Git branch`, `Git status`, `Agent lane`, `Depends on`, and `Commit`.
+- Delivery statuses: `Planned`, `In Progress`, `Blocked`, `Ready`, `Merged`.
+- Git statuses: `not-started (branch absent)`, `active-clean`, `active-dirty: <paths>`, `pushed-ci-green`, `merged`.
+- Every `Description` requirement `R<n>` has exactly one matching `Acceptance` item `A<n>`. Counts must match.
+- Implement only the selected PR. Do not pull future-PR scope forward.
+- Required unit/integration tests are offline. Live provider tests use `@pytest.mark.network` and are excluded from required gates.
+- Production dataframe operations are Polars-first; no production pandas dependency.
+- Runtime `lake/` is ignored by Git.
+- `README.md`, `ARCHITECTURE.md`, `AGENTS.md`, and this backlog must not intentionally contradict one another.
 
 ## Git Workflow Contract
 
-Every implementation PR uses these exact conventions:
+Every implementation PR uses:
 
 ```text
 Git branch: pr-XX/<kebab-case-description>
-Commit:     type(pr-XX): <description>
+Commit:     type(pr-XX): <lowercase imperative description>
+```
+
+Allowed Conventional Commit types:
+
+```text
+feat fix docs test refactor perf build ci chore
 ```
 
 Rules:
 
-- Branch name and Conventional Commit scope contain the same `pr-XX` identifier as the backlog entry.
-- Allowed commit types: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`, `ci`, `chore`.
-- Example: branch `pr-06/cboe-volatility-provider`, commit `feat(pr-06): ingest cboe volatility indices`.
-- A PR starts only after every item in `Depends on` is merged to `main`; branch from dependency-complete `main`.
-- Before each push, the repository pre-push gate must pass and `git status --short` must be empty.
-- Before marking `Ready`, the branch must be pushed, the four parallel execution checks plus the `coverage` check must be green, combined production-code line coverage must be at least `90.0%`, and the PR backlog field must read `Git status: pushed-ci-green`.
-- After merge, set `Status: Merged`, fill `PR`, and set `Git status: merged`.
-- Do not force-push shared branches, reuse a branch for another PR, or resolve semantic conflicts by guessing.
-
-Current planning state: no planned `pr-XX/...` implementation branches exist, therefore every PR below starts with `Git status: not-started (branch absent)`.
+- Branch and commit scope contain the same `pr-XX` as the backlog entry.
+- Branch from dependency-complete `main` only after every `Depends on` PR is merged.
+- Before push: required local quality gate passes and `git status --short` is empty.
+- Before `Ready`: remote `lint`, `type`, `unit`, `integration`, `coverage` are green and Git status is `pushed-ci-green`.
+- Enable PR auto-merge with squash when the PR is ready; protected `main` ensures merge occurs only after the merge gate passes.
+- After merge: update backlog status/PR link/Git status in the next documentation-maintenance change; do not keep an implementation task alive to start another PR.
+- No force-push on shared branches, branch reuse, or guessed semantic conflict resolution.
 
 ## Push And Merge Quality Gates
 
-Quality gates are part of the repository contract, not optional agent advice.
+Required checks:
 
-### Coverage threshold
+```text
+lint
+type
+unit
+integration
+coverage
+```
 
-Required combined **production-code line coverage is `>= 90.0%`** on every push and merge candidate.
+### Parallel execution
 
-Coverage scope is the production Python code under:
+`lint`, `type`, `unit`, and offline `integration` start independently/in parallel. `unit` and `integration` produce separate raw coverage data.
+
+### Coverage
+
+`coverage` depends only on `unit` and `integration`, combines their raw data, and enforces production-code **line coverage >= 90.0%** for:
 
 ```text
 application/
@@ -61,93 +72,67 @@ api/
 scripts/
 ```
 
-Tests, fixtures, generated artifacts, and the runtime `lake/` are excluded from the denominator. The threshold is calculated from the **combined** results of the unit and offline integration suites; neither suite is required to reach 90% in isolation. Live `network` tests never contribute to the required threshold.
+Tests, fixtures, generated artifacts, and `lake/` are excluded. `89.99%` fails; `90.00%` passes. Do not exclude production files merely to reach the threshold.
 
-### Local pre-push gate
+### Triggers
 
-The repository-managed pre-push hook starts these four execution classes **in parallel**:
-
-```text
-lint
-type
-unit
-integration
-```
-
-`unit` and `integration` write separate coverage data files. After both test classes finish successfully, a `coverage` aggregation step combines their data and runs the equivalent of:
+The same gate runs on:
 
 ```text
-coverage report --fail-under=90
-```
-
-A non-zero result from any of the four parallel classes **or** combined coverage below `90.0%` blocks `git push`. The integration class is offline and excludes `network` tests.
-
-### Remote push gate
-
-GitHub Actions starts the same four independent jobs on every `push`. The `unit` and `integration` jobs upload separate raw coverage artifacts. A fifth job named exactly `coverage` depends only on `unit` and `integration`, downloads/combines their coverage data, and fails below `90.0%`.
-
-A feature branch is not considered ready unless all five checks are green:
-
-```text
-lint
-type
-unit
-integration
-coverage
-```
-
-### Pull-request / merge gate
-
-The same five checks run for:
-
-```text
+local pre-push
+GitHub push
 pull_request -> main
 merge_group
 ```
 
-`main` must be protected/ruleset-controlled so merging requires all five exact checks:
+### Target GitHub repository policy
 
-```text
-lint
-type
-unit
-integration
-coverage
-```
+`main` must be ruleset/protection controlled:
 
-Direct pushes to `main` are forbidden. `merge_group` support keeps the same checks valid when a merge queue is enabled.
+- pull request required;
+- direct push, force push, and branch deletion blocked;
+- required checks: `lint`, `type`, `unit`, `integration`, `coverage`;
+- branch up-to-date / merge-queue compatible;
+- squash merge only;
+- repository auto-merge enabled;
+- implementation PRs use auto-merge so GitHub completes them only after all required gates pass;
+- head branch deleted after merge.
 
-The first four jobs must not depend on one another and therefore run in parallel. The `coverage` job is deliberately an aggregation gate with `needs: [unit, integration]`; it must not rerun the test suites or replace either required test check.
+## Mandatory Design Patterns
 
-## Parallel-Agent Rules
+Use patterns only where they reduce coupling; prefer composition/`typing.Protocol` over inheritance.
 
-Two weak agents are expected to work in parallel.
-
-- **Agent A:** registry/path contracts, CBOE/STOXX/Yahoo, Silver, volatility Gold, immutable Gold storage, build sidecars.
-- **Agent B:** Parquet IO, shared HTTP client, ECB/FRED, operational manifests/inventory, macro Gold, Gold catalog.
-- **Integration/Foundation:** use the first free agent only after listed dependencies merge; do not overlap integration PRs with unresolved dependency PRs.
-- Provider PRs are deliberately independent of one another once their common foundations are merged. The backlog does not encode fake serial dependencies merely because the same agent is likely to execute them sequentially.
-- If two PRs ultimately touch the same file, the later branch must rebase on current dependency-complete `main` before implementation.
+- **Ports and Adapters / Hexagonal Architecture** — `application` owns contracts/use cases; `ingestion` implements provider/filesystem adapters.
+- **Adapter** — CBOE/STOXX/Yahoo/ECB/FRED and physical persistence implementations.
+- **Strategy** — retry policy, incremental/reconcile planning policy, consumer resolution policy.
+- **Registry/Factory** — canonical series/provider adapter routing; orchestration must not use provider `if/elif` ladders.
+- **Repository** — Bronze, Silver, state, run manifest, inventory, Gold build and Gold catalog persistence.
+- **Unit of Work** — one-series Bronze durability boundary and Gold catalog promotion boundary.
+- **State Machine** — Gold publication `building -> complete|failed`; catalog alone owns publication status.
+- **Materialized View** — root `manifest.json` and `feature_profile.png` are rebuildable views of authoritative `manifest.parquet`.
+- **Mark-and-Sweep** — retention tombstones a build in the catalog before physical deletion.
+- **Command** — CLI adapters parse/call/render; no provider/persistence business logic.
+- **Dependency Injection** — clock, sleeper, HTTP client, repositories, provider registry, source-control identity, and policies are injected.
 
 ## Initial Series Catalog
 
-| Canonical series ID | Primary source | Source series / file | Native shape | Provider capability | Bootstrap policy |
+| Canonical ID | Provider | Source | Shape | Capability | Bootstrap |
 |---|---|---|---|---|---|
-| `vix` | CBOE | `VIX_History.csv` | `ohlc` | `full_file` | complete public history |
-| `vix9d` | CBOE | `VIX9D_History.csv` | `ohlc` | `full_file` | complete public history |
-| `vix3m` | CBOE | `VIX3M_History.csv` | `ohlc` | `full_file` | complete public history when exposed |
-| `vix6m` | CBOE | `VIX6M_History.csv` | `ohlc` | `full_file` | complete public history when exposed |
-| `vix1y` | CBOE | `VIX1Y_History.csv` | `ohlc` | `full_file` | complete public history when exposed |
-| `vstoxx` | STOXX | `V2TX` | `scalar` | `full_file` | maximum exposed public history |
+| `vix` | CBOE | `VIX_History.csv` | `ohlc` | `full_file` | maximum exposed history |
+| `vix9d` | CBOE | `VIX9D_History.csv` | `ohlc` | `full_file` | maximum exposed history |
+| `vix3m` | CBOE | `VIX3M_History.csv` | `ohlc` | `full_file` | maximum exposed history when available |
+| `vix6m` | CBOE | `VIX6M_History.csv` | `ohlc` | `full_file` | maximum exposed history when available |
+| `vix1y` | CBOE | `VIX1Y_History.csv` | `ohlc` | `full_file` | maximum exposed history when available |
+| `vstoxx` | STOXX | `V2TX` | `scalar` | `full_file` | maximum exposed history |
 | `move` | Yahoo Finance | `^MOVE` | `ohlc` | `date_range` | maximum available history |
-| `ciss` | ECB Data Portal | `CISS.D.U2.Z0Z.4F.EC.SS_CIN.IDX` | `scalar` | `date_range` | complete exposed ECB history |
-| `estr` | ECB Data Portal | `EST.B.EU000A2X2A25.WT` | `scalar` | `date_range` | complete exposed ECB history |
-| `euro_hy_oas` | FRED | `BAMLHE00EHYIOAS` | `scalar` | `date_range` | all currently exposed observations; never truncate older local history |
-| `us_2y` | FRED | `DGS2` | `scalar` | `date_range` | complete exposed history |
-| `us_10y` | FRED | `DGS10` | `scalar` | `date_range` | complete exposed history |
-| `usd_broad` | FRED | `DTWEXBGS` | `scalar` | `date_range` | complete exposed history |
+| `ciss` | ECB | `CISS.D.U2.Z0Z.4F.EC.SS_CIN.IDX` | `scalar` | `date_range` | maximum exposed history |
+| `estr` | ECB | `EST.B.EU000A2X2A25.WT` | `scalar` | `date_range` | maximum exposed history |
+| `euro_hy_oas` | FRED | `BAMLHE00EHYIOAS` | `scalar` | `date_range` | maximum currently exposed history; preserve older local history |
+| `us_2y` | FRED | `DGS2` | `scalar` | `date_range` | maximum exposed history |
+| `us_10y` | FRED | `DGS10` | `scalar` | `date_range` | maximum exposed history |
+| `usd_broad` | FRED | `DTWEXBGS` | `scalar` | `date_range` | maximum exposed history |
 
-No additional series belongs in the MVP without a separate backlog PR. The registry is the authority; provider modules do not invent symbols or implicit fallbacks.
+No additional MVP series or implicit provider fallback is allowed without a separate PR.
 
 ## Medallion Storage Contract
 
@@ -173,7 +158,7 @@ lake/
     dataset_inventory.parquet
 ```
 
-### Bronze common contract
+### Bronze common schema
 
 ```text
 series_id: String
@@ -184,9 +169,9 @@ source_id: String
 source_url: String
 ```
 
-Native payload columns are exactly one of `open/high/low/close` or scalar `value`. Natural key: `(provider, series_id, observation_date)`.
+Payload is exactly OHLC (`open/high/low/close`) or scalar (`value`). Natural key `(provider, series_id, observation_date)`.
 
-### Silver contract
+### Silver schema
 
 ```text
 observation_date: Date
@@ -202,45 +187,41 @@ source_id: String
 fetched_at_utc: Datetime(time_zone="UTC")
 ```
 
-Natural key: `(series_id, observation_date)`. OHLC sources use `value=close`; scalar sources use `value` and null OHLC fields.
+Natural key `(series_id, observation_date)`. OHLC uses `value=close`; scalar uses `value` and null OHLC.
 
-### Gold timestamp contract
+### Gold timestamp
 
 ```text
 timestamp_m1: Datetime(time_unit="us", time_zone="UTC")
 ```
 
-`timestamp_m1` is the first Gold column, unique and strictly increasing. Silver dates map to `00:00:00 UTC`. Gold contains no `observation_date`. `_m1` is an interoperability name only; the dataset remains daily. This timestamp identifies the source observation day and is **not** a provider publication/availability timestamp.
+First column, unique, strictly increasing, UTC midnight. It is observation-day identity, **not** provider publication/availability time. Gold contains no `observation_date`.
 
-### Gold feature-math contract
-
-All `delta_Nobs` features use observation lags rather than calendar-day subtraction:
+### Gold feature math
 
 ```text
 delta_Nobs(t) = x(t) - x(previous Nth valid observation)
 ```
 
-All `zscore_60obs` features use the last 60 valid observations including `t`, population standard deviation (`ddof=0`), and are null before 60 observations or when standard deviation is zero. Cross-series ratios/spreads use only same-`timestamp_m1` values. No forward-fill, backward-fill, interpolation, centered windows, or as-of carry is allowed in the MVP.
+`zscore_60obs` uses last 60 valid observations including current and `ddof=0`; null before 60 observations or at zero variance. Cross-series features require same timestamp. No forward/back fill, interpolation, centered window, future data, or implicit as-of carry. Final Gold normalizes NaN to null and rejects infinity.
 
-### Gold semantic version contract
+### Gold semantic versions
 
 ```text
 schema_version  = 1
 feature_version = 1
 ```
 
-Increment `schema_version` only when Gold column names/order/types change. Increment `feature_version` when formulas/parameters change without a schema change. Versions are source-controlled constants; runtime never auto-increments them.
+Schema version changes for column name/order/type changes; feature version changes for formula/parameter semantics without schema change. Runtime never auto-increments.
 
-### Gold root catalog contract
+### Gold catalog schema
 
-`lake/gold/dataset=regime_features_daily/manifest.parquet` is the only authoritative current-selection catalog.
-
-Exact fields:
+Authoritative `lake/gold/dataset=regime_features_daily/manifest.parquet` fields:
 
 ```text
 dataset_id
 build_id
-status                 # building | complete | failed
+status                  # building | complete | failed
 current
 started_at_utc
 completed_at_utc
@@ -252,62 +233,76 @@ row_count
 data_path
 build_manifest_path
 plot_path
+pruned_at_utc
 ```
 
-Root `manifest.json` mirrors the authoritative catalog for inspection. Root `feature_profile.png` belongs to the authoritative current build. Neither sidecar chooses current independently.
+Root JSON/PNG are materialized views, not authority.
 
-## Incremental Update Contract
+## Revision And Reconciliation Contract
 
-1. No Bronze history -> bootstrap maximum available public history.
-2. Existing history -> `start = latest_stored_date - overlap_days`, default 7 calendar days; `end = injected_today`.
-3. `date_range` providers receive exact bounds.
-4. `full_file` providers may refetch their compact public file but diff/write only inserted or revised rows.
-5. Shorter upstream responses never delete older local history.
-6. Only affected Bronze/Silver monthly partitions are rewritten.
-7. State advances only after durable data plus success-run persistence.
-8. Unchanged reruns are logical and physical no-ops for Bronze/Silver partitions.
+Planner modes:
+
+```text
+bootstrap
+incremental
+reconcile
+```
+
+- `bootstrap`: maximum public history for empty Bronze.
+- `incremental`: `latest_stored_date - overlap_days` through injected current date; default overlap 7 calendar days.
+- `reconcile`: periodic maximum-history request; default every 7 days, to detect revisions older than the overlap window.
+- `full_file` providers naturally fetch full history; `date_range` providers omit/re-expand bounds during reconcile to request maximum exposed history.
+- A shorter/omitted source response never implies deletion of retained history.
+- Equal-key observations may be revised.
+- Explicit deletion semantics require a future explicit source-mutation contract; they are not inferred from omission.
 
 ## PR Graph
 
 ```text
-PR-01 bootstrap + quality gates
+PR-01 foundation + quality/Git policy
   |\
-  | +--> PR-03 Parquet IO --------------------+
-  | +--> PR-04 shared HTTP                    |
-  +----> PR-02 contracts --------+            |
-                                 +--> PR-05 planner/state
-                                 |       |
-                                 |       +--> PR-06 CBOE ----+
-                                 |       +--> PR-07 STOXX ---+
-                                 |       +--> PR-08 Yahoo ---+--> PR-12 Bronze orchestration
-                                 |       +--> PR-09 ECB -----+         |
-                                 |       +--> PR-10 FRED ----+         v
-                                 |                           |      PR-13 Silver
-                                 +--> PR-11 manifests -------+       /       \
-                                          |                        /         \
-                                          +--> PR-14 inventory   PR-15     PR-16
-                                               CLI              volatility   macro
-                                                                    \       /
-                                                                     PR-17 Gold frame
-                                                                      /      \
-                                                               PR-18 storage PR-19 catalog
-                                                                     |          |
-                                                               PR-20 sidecars   |
-                                                                      \        /
-                                                                       PR-21 publication
-                                                                              |
-                                                                         PR-22 retention
-                                                                              |
-                                                     PR-14 inventory CLI ------+------ PR-23 daily pipeline
+  | +--> PR-03 Parquet repositories -----------+
+  | +--> PR-04 HTTP/provider ports ------------+
+  +----> PR-02 registry/path contracts --------+
+                         |                       |
+                         +--> PR-05 planner/state+
+                                   |
+                       +-----------+-----------+-----------+-----------+
+                       |           |           |           |           |
+                     PR-06       PR-07       PR-08       PR-09       PR-10
+                     CBOE        STOXX       Yahoo       ECB         FRED
+                       \           |           |           |           /
+                        +----------+-----------+-----------+----------+
+                                           |
+                              PR-11 manifests/inventory
+                                           |
+                              PR-12 Bronze orchestration
+                                  /                 \
+                           PR-13 Silver          PR-14 inventory CLI
+                              /      \
+                         PR-15      PR-16
+                         vol Gold   macro Gold
+                              \      /
+                               PR-17 canonical Gold
+                                /                 \
+                         PR-18 build store     PR-19 catalog/resolution
+                              |
+                         PR-20 build sidecars
+                              \                 /
+                               PR-21 publication
+                                      |
+                               PR-22 retention
+                                      |
+                         PR-14 -------+------- PR-23 daily pipeline
 ```
 
 ---
 
-## PR-01: Bootstrap Python Repository And Enforced Quality Gates
+## PR-01: Bootstrap Repository, Quality Gates, And Git Policy
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
@@ -322,30 +317,32 @@ Depends on: none
 Commit: `chore(pr-01): bootstrap repository and quality gates`
 
 Description:
-- R1: Create a `uv`/`pyproject.toml` project for Python >=3.13 with runtime dependencies `polars`, `pyarrow`, `httpx`, `pydantic`, `PyYAML`, and `matplotlib`, plus development dependencies `pytest`, `pytest-cov`, `coverage`, `ruff`, and `mypy`; configure coverage source to `application/`, `ingestion/`, `api/`, and `scripts/`, excluding tests/fixtures/generated/runtime lake files; do not add pandas to production dependencies.
-- R2: Create minimal importable package roots `application/`, `ingestion/`, `api/`, `scripts/`, `tests/unit/`, `tests/integration/`, and `tests/fixtures/`; register pytest markers `integration` and `network`, with `network` excluded from every required quality gate.
-- R3: Add Makefile targets `lint`, `type`, `unit`, `integration`, `coverage`, and `quality-gate`; `lint` runs `ruff format --check` plus `ruff check`, `type` runs mypy, `unit` and `integration` run their respective offline pytest suites while writing distinct coverage data files, `coverage` combines those files and enforces total production-code line coverage `>=90.0%`, and `quality-gate` starts `lint|type|unit|integration` in parallel then runs the coverage aggregation after both test suites succeed.
-- R4: Add a repository-managed pre-push hook plus an idempotent installer command so an installed hook runs the four execution classes in parallel and then the combined `coverage` gate before `git push`; any failed class or combined line coverage below `90.0%` blocks the push.
-- R5: Add `.github/workflows/quality-gates.yml` triggered by `push`, `pull_request` targeting `main`, and `merge_group`, with four independent parallel jobs named exactly `lint`, `type`, `unit`, and `integration`; `unit` and `integration` upload distinct raw coverage artifacts, and a fifth required job named exactly `coverage` with `needs: [unit, integration]` downloads/combines them and enforces `>=90.0%` without rerunning tests.
-- R6: Add a Conventional Commits validator for implementation commits: subjects must match `<type>(pr-XX): <description>` where type is one of `feat|fix|docs|test|refactor|perf|build|ci|chore`, and the `pr-XX` scope must match the PR identifier encoded in the feature branch name; generated merge-group commits are excluded from this subject check.
-- R7: Add a documented/scripted GitHub merge-gate setup requiring the five exact checks `lint`, `type`, `unit`, `integration`, and `coverage` on `main`, requiring pull requests, preventing direct pushes to `main`, and supporting merge queue/`merge_group` checks when enabled.
-- R8: Add `.gitignore` rules for `.venv/`, Python/test/coverage caches, temporary quality-gate output, and the complete `lake/` runtime tree; update `README.md` and `ARCHITECTURE.md` only where bootstrap/tooling behavior is documented.
+- R1: Create Python >=3.13 `uv` project; runtime dependencies `polars`, `pyarrow`, `httpx`, `pydantic`, `PyYAML`, `matplotlib`; dev dependencies `pytest`, `pytest-cov`, `coverage`, `ruff`, `mypy`; no production pandas.
+- R2: Create importable `application/`, `application/ports/`, `ingestion/`, `api/`, `scripts/`, `tests/unit/`, `tests/integration/`, `tests/fixtures/`; register `integration` and `network` pytest markers; preserve `AGENTS.md` rules.
+- R3: Add Make targets `lint`, `type`, `unit`, `integration`, `coverage`, `quality-gate`; first four execute independently in parallel, test targets write separate coverage data, `coverage` combines and `--fail-under=90`.
+- R4: Add repository-managed idempotent pre-push hook installer; dirty worktree, any execution failure, or combined coverage `<90.0%` blocks push.
+- R5: Add `.github/workflows/quality-gates.yml` for `push`, `pull_request` to `main`, and `merge_group`: four parallel jobs exactly `lint|type|unit|integration`, plus `coverage` with `needs: [unit, integration]` and raw coverage artifact combination.
+- R6: Add Conventional Commit/branch validator requiring `type(pr-XX): ...` scope to match `pr-XX/...`; exempt generated merge-group commits only.
+- R7: Add idempotent GitHub repository setup script/documentation that configures protected `main`, five required checks, PR-only/no force/no delete, squash-only merging, auto-delete head branches, repository `allow_auto_merge`, and merge-queue compatibility; fail visibly when admin permissions are insufficient.
+- R8: Add a documented/helper command for `gh pr merge <PR> --auto --squash` (or equivalent API) so implementation PRs are queued for auto-completion and cannot merge until branch protection requirements are green.
+- R9: Add `.gitignore` for virtualenv/caches/coverage/temp outputs and `lake/`; keep README/ARCHITECTURE/AGENTS synchronized with implemented tooling.
 
 Acceptance:
-- A1 (verifies R1): `uv sync --extra dev` resolves the stated dependency families including explicit `coverage`; coverage configuration includes exactly the declared production roots/exclusions and production dependency inspection finds no pandas.
-- A2 (verifies R2): All required package/test roots import or exist, pytest recognizes both markers, and default required tests never select `network` tests.
-- A3 (verifies R3): Each Make target runs the stated tool/test class; unit/integration create separate readable coverage data, their combination reports the union, `89.99%` fails while `90.00%` passes, and an injected failure in any parallel child makes `make quality-gate` non-zero while the other execution classes are still started independently.
-- A4 (verifies R4): Hook installation is idempotent; clean fake execution plus coverage `>=90.0%` permits push, while a failed execution class or coverage `<90.0%` exits non-zero before push proceeds.
-- A5 (verifies R5): Workflow contract tests prove all three triggers exist, `lint|type|unit|integration` have no inter-job `needs`, unit/integration upload distinct coverage artifacts, `coverage` depends exactly on the two test jobs, combines both artifacts, uses `--fail-under=90`, and all five checks are required outputs of the workflow.
-- A6 (verifies R6): Valid examples such as `feat(pr-06): ingest cboe volatility indices` pass; missing scope, wrong PR scope, invalid type, and malformed subjects fail deterministically.
-- A7 (verifies R7): The setup documentation/script names all five required checks exactly including `coverage`, disallows direct `main` pushes, and documents the one-time repository-setting step needed if GitHub permissions prevent automatic configuration.
-- A8 (verifies R8): Ignored artifacts are not tracked, and the documentation sidecars remain consistent with the bootstrap/quality-gate contract.
+- A1 (verifies R1): dependency resolution succeeds and production dependency inspection finds no pandas.
+- A2 (verifies R2): all roots exist/import, markers register, required tests exclude `network`, and AGENTS remains present.
+- A3 (verifies R3): four children start independently; separate coverage data combine correctly; `89.99%` fails and `90.00%` passes.
+- A4 (verifies R4): hook install is idempotent and each dirty/failure/coverage-negative case blocks push.
+- A5 (verifies R5): workflow contract tests prove triggers, no inter-job `needs` among first four, exact coverage dependency/artifacts, and five stable check names.
+- A6 (verifies R6): matching examples pass; malformed type/scope/PR mismatch fail deterministically.
+- A7 (verifies R7): setup contract contains every required repository setting, is idempotent, and returns non-zero/actionable output when configuration cannot be applied.
+- A8 (verifies R8): helper requests auto-squash merge but an integration/mock check proves required checks remain the gating condition.
+- A9 (verifies R9): ignored artifacts are untracked and documentation does not contradict implemented tooling.
 
-## PR-02: Define Series Registry And Lake Path Contracts
+## PR-02: Define Registry, Paths, And Adapter Registry Contracts
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
@@ -360,22 +357,24 @@ Depends on: PR-01
 Commit: `feat(pr-02): define series and lake contracts`
 
 Description:
-- R1: Add one immutable typed registry containing exactly the 13 initial canonical series with `series_id`, provider, source ID/file, unit, native shape, frequency, bootstrap strategy, and provider capability.
-- R2: Make provider capabilities explicit as only `date_range` or `full_file`; make native shapes explicit as only `ohlc` or `scalar`, with `vstoxx` normalized to the scalar contract instead of the current ambiguous `scalar/provider-native` wording.
-- R3: Add typed helpers for Bronze/Silver monthly paths, Gold dataset root, version `data.parquet`, build `manifest.json`, build `feature_profile.png`, root `manifest.parquet`, root `manifest.json`, root `feature_profile.png`, ingestion state, ingestion-run manifest, and inventory paths.
-- R4: Validate duplicate canonical IDs, unknown providers, empty source IDs, invalid units/frequencies, unsupported native shapes, and unsupported provider capabilities before adapter execution; add exact fixed-path tests for observation date `2026-08-18` and Gold build `20260818T020000Z`.
+- R1: Define immutable typed registry with exactly 13 canonical series and provider/source/unit/shape/frequency/bootstrap/capability metadata.
+- R2: Restrict shape to `ohlc|scalar` and capability to `date_range|full_file`; VSTOXX is `scalar/full_file`; validate duplicate/unknown/empty/invalid metadata.
+- R3: Define typed path service for every Bronze/Silver monthly file, Gold build/root artifact, state, run manifest, inventory path; no provider-local path literals.
+- R4: Define canonical provider enum/identity contracts and an adapter-registry interface used later as Registry/Factory; lookup unknown provider fails explicitly.
+- R5: Add exact fixed-path/registry tests for `2026-08-18` and build `20260818T020000Z` plus all invalid registry cases.
 
 Acceptance:
-- A1 (verifies R1): Registry contains exactly 13 populated entries and no additional series.
-- A2 (verifies R2): Only declared enum values pass and `vstoxx` is unambiguously scalar/full-file.
-- A3 (verifies R3): Path helpers return every exact documented path without provider-local hard-coded duplicates.
-- A4 (verifies R4): Every stated invalid condition fails before an adapter is called and all fixed path tests pass.
+- A1 (verifies R1): exactly 13 complete registry entries exist.
+- A2 (verifies R2): only declared enum values pass and VSTOXX is unambiguous.
+- A3 (verifies R3): one path service returns every documented exact path.
+- A4 (verifies R4): fake adapters can register/resolve by provider without application `if/elif`, unknown provider fails.
+- A5 (verifies R5): all fixed and invalid cases pass offline.
 
-## PR-03: Implement Polars Parquet Lake Read, Diff, And Upsert Utilities
+## PR-03: Implement Polars Lake Repositories And Atomic IO
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
@@ -387,27 +386,27 @@ Agent lane: Agent B
 
 Depends on: PR-01
 
-Commit: `feat(pr-03): add polars parquet lake io`
+Commit: `feat(pr-03): add polars parquet repositories`
 
 Description:
-- R1: Implement deterministic Polars-only reads for zero, one, or many monthly Parquet partitions and return stable sort order supplied by the caller's natural key.
-- R2: Implement atomic destination-filesystem writes using same-directory temporary files, flush/fsync where supported, and `os.replace`; a failed write must leave the previous destination readable and remove/ignore its temp artifact on restart.
-- R3: Implement a pure logical diff/upsert by caller-supplied natural key: classify inserts, unchanged rows, and revisions; new equal-key rows replace old ones exactly once; duplicate keys in incoming data are rejected rather than resolved by row order.
-- R4: Rewrite only monthly partitions containing inserted/revised rows; a logical no-op must not rewrite any monthly file and unrelated partitions must remain byte/mtime unchanged.
-- R5: Add tests for empty/single/multi-month reads, duplicate incoming keys, revision replacement, no-op physical preservation, deterministic ordering, same-directory atomic replacement, simulated interrupted temp file, and unaffected-month preservation.
+- R1: Define narrow repository/IO ports and Polars filesystem adapters for deterministic zero/one/multi monthly reads with caller-key ordering.
+- R2: Implement same-directory temp write, flush/fsync where supported, and `os.replace`; stale temp never becomes authoritative.
+- R3: Implement pure diff by supplied natural key returning inserts/unchanged/revisions; reject duplicate incoming keys; equal-key new row replaces once.
+- R4: Rewrite only months containing inserts/revisions; logical no-op preserves file hashes/mtime and unrelated months.
+- R5: Add tests for read modes, atomic interruption, stale temp, duplicate keys, revision, no-op, deterministic ordering, and unaffected partitions.
 
 Acceptance:
-- A1 (verifies R1): Fixtures prove all three read modes, stable caller-key ordering, and production lake code contains no pandas import.
-- A2 (verifies R2): Successful writes leave one valid destination and no live temp; injected pre-replace failure retains the old Parquet; a stale temp does not become authoritative on read/restart.
-- A3 (verifies R3): Fixtures classify inserts/unchanged/revisions exactly; identical rerun produces no changes; duplicate incoming natural keys fail deterministically.
-- A4 (verifies R4): No-op update preserves destination hash/mtime and an update to one month leaves every unrelated month unchanged.
-- A5 (verifies R5): Every listed IO/diff/restart case has a focused passing offline test.
+- A1 (verifies R1): repository test doubles and filesystem adapters satisfy the same contracts and production code contains no pandas.
+- A2 (verifies R2): injected failures preserve prior destination; no stale temp is authoritative.
+- A3 (verifies R3): classifications and duplicate rejection are exact/idempotent.
+- A4 (verifies R4): no-op and unrelated partitions remain byte/mtime unchanged.
+- A5 (verifies R5): all IO/repository cases pass offline.
 
-## PR-04: Add Shared HTTP Client And Provider Adapter Port
+## PR-04: Add Shared HTTP Port, Retry Strategy, And Provider Protocol
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
@@ -417,33 +416,33 @@ Git status: `not-started (branch absent)`
 
 Agent lane: Agent B
 
-Depends on: PR-01
+Depends on: PR-01, PR-02
 
 Commit: `feat(pr-04): add shared http provider port`
 
 Description:
-- R1: Define a narrow application-facing HTTP request/response port and provider adapter protocol so provider modules do not construct unrelated `httpx.Client` instances or leak HTTP details into orchestration.
-- R2: Implement one `httpx` adapter with explicit connect/read/write/pool timeouts, injected retry policy, bounded attempts, retry only for documented transient transport errors plus HTTP `429` and `5xx`, and no retry for other `4xx` responses.
-- R3: Implement deterministic bounded exponential backoff with injectable sleep and no random jitter in tests; honor numeric `Retry-After` when present without exceeding the configured maximum delay.
-- R4: Define typed provider errors carrying provider, canonical series ID, source ID, request context, and status/error category while never embedding API keys, authorization values, or full secret query strings.
-- R5: Add offline tests for success, timeout, transport error, retryable 429/5xx, non-retryable 4xx, retry exhaustion, Retry-After, injected sleep sequence, and secret redaction.
+- R1: Define application-facing HTTP request/response port and `MarketDataProvider` protocol; application imports no `httpx`.
+- R2: Implement one `httpx` adapter with explicit timeouts and injected `RetryPolicy` Strategy: bounded retries for transient transport errors, `429`, `5xx`; no generic retry for other `4xx`.
+- R3: Implement bounded exponential backoff with injected sleeper, deterministic tests, and numeric `Retry-After` capped by configured maximum.
+- R4: Define typed sanitized provider error with provider/series/source/request category but no API key/auth/full-secret URL.
+- R5: Add tests for success, timeout, retry/non-retry statuses, exhaustion, Retry-After, sleep sequence, protocol substitution, and secret redaction.
 
 Acceptance:
-- A1 (verifies R1): Provider-facing test doubles implement one stable protocol and application code can orchestrate them without importing `httpx`.
-- A2 (verifies R2): Mocked responses prove exact retry/non-retry categories, attempt limits, and explicit timeout configuration.
-- A3 (verifies R3): Fixed configuration produces the exact expected sleep sequence, Retry-After is honored within the cap, and tests never perform real sleeping.
-- A4 (verifies R4): Error fixtures expose all safe identity/context fields and assertions prove configured secrets never appear in messages/representations.
-- A5 (verifies R5): Every stated HTTP/retry/error case passes offline.
+- A1 (verifies R1): fake provider/HTTP implementations substitute without `httpx` in application.
+- A2 (verifies R2): exact retry categories/attempts/timeouts are proven.
+- A3 (verifies R3): deterministic delay/cap sequence passes without real sleep.
+- A4 (verifies R4): safe context remains and configured secrets never appear.
+- A5 (verifies R5): all stated cases pass offline.
 
-## PR-05: Implement Bootstrap, Incremental Planner, And Ingestion State
+## PR-05: Implement Bootstrap, Incremental, Reconcile Planner And State
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
-Git branch: `pr-05/incremental-planner-state`
+Git branch: `pr-05/planner-reconciliation-state`
 
 Git status: `not-started (branch absent)`
 
@@ -451,29 +450,29 @@ Agent lane: Foundation; first free agent
 
 Depends on: PR-02, PR-03
 
-Commit: `feat(pr-05): add incremental ingestion planner`
+Commit: `feat(pr-05): add ingestion planner and reconciliation`
 
 Description:
-- R1: Implement a pure planner that returns `bootstrap` when no Bronze observations exist and `incremental` when a latest stored observation exists; planner input includes canonical series contract, durable latest date, injected `today`, and overlap days.
-- R2: For incremental mode compute `logical_start=latest_stored_date-overlap_days` with default `7` calendar days and `logical_end=injected_today`; reject `logical_end < logical_start` and non-positive/invalid configuration.
-- R3: Map logical plans to provider instructions: `date_range` emits exact start/end bounds; `full_file` emits a complete-file request while retaining logical bounds as metadata for diff/state/audit.
-- R4: Define `ingestion_state.parquet` with explicit schema and unique key `(provider, series_id)`, including `last_success_utc`, `last_observed_date`, `last_requested_start`, `last_requested_end`, `mode`, `fetched_row_count`, and `changed_row_count`; writes use shared atomic/upsert IO.
-- R5: State advances only after a caller reports durable data and success-manifest persistence; failed/no-durable execution retains the previous state exactly.
-- R6: Use only injected dates/times in planner/state code and tests; no direct `date.today()`, `datetime.now()`, or hidden wall-clock dependency is allowed in the application path.
+- R1: Implement pure planner modes `bootstrap|incremental|reconcile` from registry contract, durable latest date/state, injected clock, overlap and reconcile interval.
+- R2: Incremental computes `latest-overlap` to injected today (default overlap 7 calendar days); validate invalid ranges/config.
+- R3: Reconcile is selected when no successful reconciliation exists or configured interval (default 7 days) elapsed; it requests maximum currently exposed history; `full_file` remains full-file in all modes.
+- R4: Define `ingestion_state.parquet` key `(provider,series_id)` with last success, last observation, last requested bounds, mode, fetched/changed counts, and `last_reconcile_utc`.
+- R5: State advances only after caller confirms durable Bronze plus success run manifest; no-op may advance success/reconcile timestamps but not fabricate observation coverage.
+- R6: All dates/times are injected; no hidden wall clock.
 
 Acceptance:
-- A1 (verifies R1): No-history/history fixtures return exact bootstrap/incremental plans for every capability class.
-- A2 (verifies R2): Tests prove default/custom overlap, exact injected end date, and all invalid ranges/configurations fail deterministically.
-- A3 (verifies R3): The two capability types produce exact documented provider instructions while retaining identical logical-plan metadata.
-- A4 (verifies R4): State schema/types round-trip and repeated equal-key update leaves exactly one row.
-- A5 (verifies R5): Failure/no-durable fixtures preserve the previous state byte/logically; success advances only after the simulated durability barrier.
-- A6 (verifies R6): Static/runtime tests prove deterministic injected-clock behavior with no production planner use of wall-clock functions.
+- A1 (verifies R1): fixed state/clock fixtures select exact three modes.
+- A2 (verifies R2): overlap/range validation is exact.
+- A3 (verifies R3): interval boundary and max-history reconcile instructions pass for both capability classes.
+- A4 (verifies R4): typed state round-trip/upsert leaves one row/key.
+- A5 (verifies R5): failure preserves prior state; no-op semantics are exact.
+- A6 (verifies R6): deterministic clock tests/static checks find no production wall-clock call.
 
-## PR-06: Add CBOE Volatility-Index Provider
+## PR-06: Add CBOE Volatility Provider
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
@@ -488,26 +487,24 @@ Depends on: PR-02, PR-04, PR-05
 Commit: `feat(pr-06): ingest cboe volatility indices`
 
 Description:
-- R1: Implement one CBOE adapter for exactly `vix`, `vix9d`, `vix3m`, `vix6m`, and `vix1y` using the registered public daily-history CSV sources and shared provider/HTTP ports.
-- R2: Treat all five CBOE sources as `full_file`; build the request only from registry source metadata and reject unregistered symbols/source IDs.
-- R3: Parse provider dates plus OHLC columns into the exact Bronze common+OHLC contract with Polars; reject invalid dates, duplicate provider dates, missing/non-finite close, or rows that cannot satisfy the natural key.
-- R4: A shorter later response never means deletion: diff it against retained Bronze, write only inserts/revisions, and permit equal-key source revisions to replace prior rows.
-- R5: If a registered CBOE public file is unavailable, return the typed provider error naming canonical series/source; do not silently fallback or synthesize data.
-- R6: Add committed representative fixtures and offline tests for all five routes, valid parsing, duplicate date, invalid OHLC, revised close, shortened response preservation, unavailable file, and shared HTTP error propagation.
+- R1: Implement one CBOE adapter for registered `vix|vix9d|vix3m|vix6m|vix1y` only through shared provider/HTTP contracts.
+- R2: Treat sources as registry-driven `full_file`; unavailable registered source returns typed error, never fallback/synthetic data.
+- R3: Parse exact Bronze common+OHLC with Polars; reject invalid/duplicate dates, missing/non-finite close, invalid natural key.
+- R4: Shorter response never deletes retained rows; equal-key revisions replace once through shared diff.
+- R5: Add representative fixtures/tests for all routes, parsing, invalid/duplicate, revision, shortened response, unavailable source, HTTP propagation.
 
 Acceptance:
-- A1 (verifies R1): Exactly the five registered canonical IDs route through the CBOE adapter and no other series is accepted.
-- A2 (verifies R2): Mocked requests prove full-file behavior and exact registry source use with no hard-coded alternative source.
-- A3 (verifies R3): Fixture output has the exact typed Bronze+OHLC schema and every stated invalid row/duplicate condition fails.
-- A4 (verifies R4): Truncated response preserves historical minimum/rows while overlap revision changes only matching keys/affected month.
-- A5 (verifies R5): Unavailable fixture returns the typed error and no fallback adapter/source is invoked.
-- A6 (verifies R6): All stated provider behaviors pass without network access.
+- A1 (verifies R1): only five registered canonical IDs resolve to CBOE.
+- A2 (verifies R2): requests use registry source/full-file and no fallback path.
+- A3 (verifies R3): exact schema and invalid cases pass.
+- A4 (verifies R4): retained history survives shortening and revision touches matching key only.
+- A5 (verifies R5): all scenarios pass offline.
 
 ## PR-07: Add STOXX VSTOXX Provider
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
@@ -522,24 +519,24 @@ Depends on: PR-02, PR-04, PR-05
 Commit: `feat(pr-07): ingest vstoxx history`
 
 Description:
-- R1: Implement a STOXX adapter only for canonical `vstoxx` / registered `V2TX` source using the shared provider/HTTP ports.
-- R2: Parse the selected public source into the registry-declared scalar Bronze contract `value: Float64`; do not allow provider-native shape guessing at runtime.
-- R3: Use the registry-declared `full_file` capability and maximum exposed public history; a shorter later upstream response never deletes older local rows.
-- R4: Reject invalid/duplicate dates and non-finite/missing scalar values; equal-key valid revisions replace retained values through shared diff/upsert.
-- R5: Add a representative committed fixture plus offline tests for bootstrap parse, stable `source_id=V2TX`, duplicate/invalid value rejection, revision, shortened-response preservation, and HTTP error propagation.
+- R1: Implement only registered `vstoxx/V2TX` through shared ports.
+- R2: Parse registry-declared scalar Bronze `value: Float64`; no runtime provider-shape guessing.
+- R3: Use `full_file`, preserve older history on shorter response, permit equal-key revisions.
+- R4: Reject invalid/duplicate dates and missing/non-finite values; propagate safe HTTP/provider errors.
+- R5: Add representative fixture/tests for bootstrap/reconcile, stable source identity, invalid/duplicate, revision, shortening, error propagation.
 
 Acceptance:
-- A1 (verifies R1): Only `vstoxx` with registered source metadata is accepted.
-- A2 (verifies R2): Output is exactly common Bronze fields plus scalar `value: Float64`, never an ambiguous OHLC/provider-native shape.
-- A3 (verifies R3): Request behavior is full-file and shorter responses cannot reduce retained earliest date/row set.
-- A4 (verifies R4): Duplicate/invalid fixtures fail and a valid equal-key revision replaces once.
-- A5 (verifies R5): Every stated STOXX scenario passes offline.
+- A1 (verifies R1): only registered VSTOXX mapping is accepted.
+- A2 (verifies R2): exact scalar Bronze schema is produced.
+- A3 (verifies R3): shortening/revision behavior is correct.
+- A4 (verifies R4): invalid/error cases are deterministic/sanitized.
+- A5 (verifies R5): all scenarios pass offline.
 
 ## PR-08: Add Yahoo MOVE Provider
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
@@ -554,24 +551,24 @@ Depends on: PR-02, PR-04, PR-05
 Commit: `feat(pr-08): ingest move index history`
 
 Description:
-- R1: Implement a Yahoo adapter only for canonical `move` and registered ticker `^MOVE` using shared provider/HTTP ports; reject unrelated tickers.
-- R2: Bootstrap maximum available daily history and, in incremental mode, pass the planner's exact date-range bounds through the adapter without silently expanding/shrinking them.
-- R3: Normalize only daily OHLC market fields into exact common Bronze+OHLC columns; exclude volume/dividend/split/corporate-action fields and reject invalid/duplicate dates or missing/non-finite close.
-- R4: Equal-key revisions replace retained rows once; empty bounded responses are valid no-op results and do not advance observation coverage by fabrication.
-- R5: Add offline tests for max-history bootstrap args, exact bounded args, empty result, invalid/duplicate row, revised date, OHLC normalization, and shared HTTP error propagation.
+- R1: Implement isolated Yahoo adapter only for registered `move -> ^MOVE`; no Yahoo-specific behavior outside adapter.
+- R2: Bootstrap/reconcile request maximum available history; incremental passes exact planner range.
+- R3: Normalize only daily OHLC to exact Bronze; reject invalid/duplicate dates and missing/non-finite close; exclude volume/actions.
+- R4: Empty bounded response is valid no-op; shorter reconcile response never truncates retained history; revisions replace once.
+- R5: Add tests for max/bounded request, empty, invalid/duplicate, revision, shortening, schema, and HTTP errors.
 
 Acceptance:
-- A1 (verifies R1): Only the registry mapping `move -> ^MOVE` is accepted.
-- A2 (verifies R2): Mocked calls prove exact bootstrap/max and incremental-bound request arguments.
-- A3 (verifies R3): Output columns/types exactly match common Bronze+OHLC and prohibited corporate-action fields never appear.
-- A4 (verifies R4): Empty response yields no inserted rows/state fabrication and revision updates the equal key once.
-- A5 (verifies R5): All stated Yahoo scenarios pass offline.
+- A1 (verifies R1): only canonical MOVE mapping is accepted and application remains provider-agnostic.
+- A2 (verifies R2): exact mode request arguments pass.
+- A3 (verifies R3): schema/exclusion/invalid cases pass.
+- A4 (verifies R4): no-op/shortening/revision semantics are exact.
+- A5 (verifies R5): all scenarios pass offline.
 
 ## PR-09: Add ECB CISS And ESTR Provider
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
@@ -586,26 +583,24 @@ Depends on: PR-02, PR-04, PR-05
 Commit: `feat(pr-09): ingest ecb regime series`
 
 Description:
-- R1: Implement an ECB adapter for exactly registered `ciss` and `estr` source keys using the shared provider/HTTP ports.
-- R2: Bootstrap the complete exposed series history and pass exact planner date bounds in incremental mode; keep request construction registry-driven.
-- R3: Parse dates/scalars with Polars into the exact Bronze scalar contract; missing/non-numeric/non-finite observations are absent, not zero; duplicate dates are rejected.
-- R4: Calendar gaps remain gaps, overlap revisions replace equal keys once, and the adapter does not forward-fill/back-fill weekends or holidays.
-- R5: Propagate typed HTTP/provider errors with safe source identity and no secret leakage.
-- R6: Add representative fixtures/tests for both series, bootstrap and bounded requests, missing/non-numeric values, duplicate date, one revision, one normal calendar gap, and HTTP error propagation.
+- R1: Implement only registered CISS and ESTR SDMX/data API mappings through shared ports.
+- R2: Bootstrap/reconcile maximum exposed history; incremental uses exact planner `startPeriod/endPeriod`; MVP does not use `updatedAfter` deletion events until explicit deletion semantics exist.
+- R3: Parse exact scalar Bronze; missing/non-numeric/non-finite observations are absent, duplicates invalid; calendar gaps remain gaps.
+- R4: Treat ECB no-results response for a valid bounded query as empty/no-op where provider semantics indicate no matching observations; other typed HTTP errors propagate; revisions replace once.
+- R5: Add fixtures/tests for both series, max/bounded requests, missing/duplicate/gap, empty/no-result mapping, revision, shortening and HTTP errors.
 
 Acceptance:
-- A1 (verifies R1): Exactly the two registered ECB canonical/source mappings are accepted.
-- A2 (verifies R2): Mocked calls prove complete-history bootstrap and exact incremental bounds.
-- A3 (verifies R3): Valid output is exact Bronze scalar schema and every invalid/missing/duplicate case behaves as specified.
-- A4 (verifies R4): Gap fixture remains absent and revision replaces only the matching key with no synthetic row.
-- A5 (verifies R5): Safe typed provider error is preserved through adapter boundary.
-- A6 (verifies R6): All stated ECB cases pass offline.
+- A1 (verifies R1): exactly two mappings resolve.
+- A2 (verifies R2): mode arguments are exact and no deletion-event handling is implied.
+- A3 (verifies R3): schema/missing/duplicate/gap behavior passes.
+- A4 (verifies R4): valid no-result becomes no-op while real failures remain typed; revision is exact.
+- A5 (verifies R5): all scenarios pass offline.
 
 ## PR-10: Add FRED Rates, Credit, And Dollar Provider
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
@@ -620,26 +615,26 @@ Depends on: PR-02, PR-04, PR-05
 Commit: `feat(pr-10): ingest fred regime series`
 
 Description:
-- R1: Implement one FRED adapter mapping exactly registered `DGS2`, `DGS10`, `DTWEXBGS`, and `BAMLHE00EHYIOAS` to `us_2y`, `us_10y`, `usd_broad`, and `euro_hy_oas` through shared provider/HTTP ports.
-- R2: Bootstrap all currently exposed history and use exact planner date bounds in incremental mode; no implicit provider fallback.
-- R3: Parse dates/scalar values with Polars into exact Bronze scalar contract; treat `.`, blank, missing, and non-finite values as absent and reject duplicate dates.
-- R4: A shorter later `euro_hy_oas` response cannot truncate older retained history; valid overlap revisions still replace equal keys once.
-- R5: Define API-key configuration through environment/config injection without putting secrets in registry, URLs written to Bronze, logs, error strings, or committed fixtures.
-- R6: Add fixtures/tests for all four series, request modes, missing values, duplicate handling, one revision, shortened HY history, and secret-redaction behavior.
+- R1: Implement exactly registered `DGS2|DGS10|DTWEXBGS|BAMLHE00EHYIOAS` mappings through shared ports.
+- R2: Bootstrap/reconcile maximum currently exposed history; incremental uses exact planner observation bounds.
+- R3: Parse exact scalar Bronze; `.`, blank, missing/non-finite values are absent; duplicate dates invalid.
+- R4: Shorter responses never truncate retained history; reconcile may revise any equal-key historical observation.
+- R5: Inject required FRED API key/config; strip/redact it from persisted `source_url`, registry, logs, errors, repr, and fixtures.
+- R6: Add tests for four series, modes, missing/duplicate, historical revision, shortened HY history, API-key redaction, errors.
 
 Acceptance:
-- A1 (verifies R1): Only the four documented source IDs map to the four canonical FRED series.
-- A2 (verifies R2): Mocked requests prove full-history bootstrap and exact bounded incremental behavior.
-- A3 (verifies R3): Missing markers emit no fabricated row and duplicates/non-finite values fail as documented.
-- A4 (verifies R4): Shortened HY response preserves prior historical minimum/rows and overlap revision updates exactly once.
-- A5 (verifies R5): Tests inspect registry, persisted `source_url`, logs/errors, and fixture tree and find no API key value.
-- A6 (verifies R6): All listed FRED scenarios pass offline.
+- A1 (verifies R1): exactly four source/canonical mappings resolve.
+- A2 (verifies R2): request modes/bounds are exact.
+- A3 (verifies R3): schema/missing/duplicate behavior passes.
+- A4 (verifies R4): full reconciliation updates historical equal keys without truncation.
+- A5 (verifies R5): configured secret is absent from every persisted/diagnostic artifact tested.
+- A6 (verifies R6): all scenarios pass offline.
 
-## PR-11: Add Bronze Coverage Inventory And Ingestion-Run Manifests
+## PR-11: Add Operational Manifest And Inventory Repositories
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
@@ -651,29 +646,27 @@ Agent lane: Agent B
 
 Depends on: PR-02, PR-03
 
-Commit: `feat(pr-11): add bronze inventory and run manifests`
+Commit: `feat(pr-11): add inventory and run manifests`
 
 Description:
-- R1: Define `dataset_inventory.parquet` with one row per canonical series and exact fields `series_id`, `provider`, `min_observation_date`, `max_observation_date`, `row_count`, `duplicate_key_count`, and `file_count` (seven columns including series identity).
-- R2: Define `ingestion_runs.parquet` keyed by unique `run_id` with provider, series ID, mode, requested bounds, fetched rows, inserted rows, revised rows, written partition count, status (`success|failed`), started/completed UTC, and sanitized error category/message.
-- R3: Persist both files with deterministic typed schemas and atomic/upsert utilities; inventory is replaced as an authoritative snapshot, while run manifest appends/upserts unique run IDs without rewriting source data.
-- R4: Do not invent expected-calendar completeness, weekend/holiday missing counts, or fill gaps; coverage means observed stored boundaries/counts only.
-- R5: Failed run records must not contain secrets and must not claim inserted/revised partitions that were not durable.
-- R6: Add tests for empty/populated inventory, exact schemas, duplicate detection, successful run, failed run, repeat same run ID, and sanitized errors.
+- R1: Define authoritative `dataset_inventory.parquet` snapshot fields `series_id,provider,min_observation_date,max_observation_date,row_count,duplicate_key_count,file_count`.
+- R2: Define `ingestion_runs.parquet` unique `run_id` fields including provider/series/mode/requested bounds/fetched/inserted/revised/written partitions/status/timestamps/sanitized error.
+- R3: Implement repository adapters: deterministic snapshot replacement for inventory and unique-run upsert for runs.
+- R4: Inventory describes observed stored coverage only; no synthetic market-calendar missing metrics.
+- R5: Failed run never contains secrets or claims non-durable inserts/revisions/partitions; add empty/populated/success/failure/idempotency tests.
 
 Acceptance:
-- A1 (verifies R1): Inventory exposes exactly one row per registered series with the seven stated fields and correct values from fixed lake fixtures.
-- A2 (verifies R2): Success/failure fixtures contain every exact run field and allowed status only.
-- A3 (verifies R3): Inventory snapshot and run upsert round-trip with deterministic ordering/types and no duplicate run ID.
-- A4 (verifies R4): No expected-calendar or synthetic missing-day metric exists in output/schema.
-- A5 (verifies R5): Failed-run fixture contains no configured secret and no false durable-change counts.
-- A6 (verifies R6): All stated manifest/inventory cases pass offline.
+- A1 (verifies R1): exact inventory schema/values pass.
+- A2 (verifies R2): exact run schema/status values pass.
+- A3 (verifies R3): deterministic round-trip and no duplicate run ID.
+- A4 (verifies R4): no expected-calendar metric exists.
+- A5 (verifies R5): failure durability/redaction and all stated cases pass.
 
-## PR-12: Add Registry-Driven Bronze Orchestration
+## PR-12: Add Registry-Driven Bronze Orchestration Unit Of Work
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
@@ -688,26 +681,26 @@ Depends on: PR-03, PR-05, PR-06, PR-07, PR-08, PR-09, PR-10, PR-11
 Commit: `feat(pr-12): orchestrate bronze updates`
 
 Description:
-- R1: Add an application service accepting canonical series IDs, resolving registry contract+planner, routing each series only to its registered provider adapter, and using shared diff/write/state/run-manifest ports; orchestration must not import provider HTTP implementation details.
-- R2: Implement `bootstrap` and `update` operation modes with injected current date/time; bootstrap rejects already-populated selected series unless explicit future reset behavior is separately specified.
-- R3: Isolate each selected series transaction boundary: one provider failure records that run failed and does not corrupt another series that successfully reaches its durability barrier.
-- R4: For success, durable order is Bronze partition write -> success run manifest -> ingestion state update; failure before that barrier leaves prior state and authoritative Bronze intact except already completed independent series.
-- R5: A logical no-op update writes a success run with zero inserted/revised/partition counts, does not rewrite Bronze partitions, and may advance `last_success_utc` while leaving `last_observed_date` unchanged.
-- R6: Add fake-adapter/temporary-lake tests for routing, bootstrap guard, bounded/full-file execution, one partial provider failure, restart after failure, no-op rerun, revision rerun, and multi-series isolation.
+- R1: Application service resolves series contract and provider via injected registries, planner, repositories; no provider implementation/HTTP imports or provider conditional ladder.
+- R2: Execute `bootstrap|incremental|reconcile` with injected clock; bootstrap on populated selected series fails before fetch.
+- R3: One selected series is a Unit of Work: fetch/parse -> diff -> durable Bronze -> durable success run -> state advance; failure before commit preserves prior state/authoritative data.
+- R4: Multi-series isolation: one failed series does not roll back separately committed series; failed run is recorded safely.
+- R5: No-op writes success run with zero changes, rewrites no Bronze file, may advance success/reconcile time but not observation coverage.
+- R6: Add fake-provider/repository tests for registry routing, all modes, partial failure, barrier failures, restart, no-op, revision, reconcile, multi-series isolation.
 
 Acceptance:
-- A1 (verifies R1): Fake adapters prove exact registry routing and no provider implementation import appears in application orchestration.
-- A2 (verifies R2): Fixed-clock fixtures select exact operations and bootstrap-on-populated fails before provider fetch.
-- A3 (verifies R3): One simulated provider failure coexists with another independently successful readable series/run/state.
-- A4 (verifies R4): Failure injection at each pre-barrier point preserves prior state/authoritative Bronze; success advances state only after simulated durable data+manifest.
-- A5 (verifies R5): No-op keeps every Bronze file hash/mtime unchanged, records zero changes, and does not fabricate a newer observation date.
-- A6 (verifies R6): All listed orchestration/restart/isolation cases pass offline.
+- A1 (verifies R1): provider registry substitution works with no application provider-specific imports/conditionals.
+- A2 (verifies R2): fixed clock/state selects exact modes and guard.
+- A3 (verifies R3): failure injection around each barrier proves commit semantics.
+- A4 (verifies R4): one failure coexists with another durable success.
+- A5 (verifies R5): file hash/mtime/state/run values prove no-op semantics.
+- A6 (verifies R6): all stated scenarios pass offline.
 
 ## PR-13: Build Canonical Silver Daily Series
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
@@ -722,24 +715,24 @@ Depends on: PR-12
 Commit: `feat(pr-13): build canonical silver series`
 
 Description:
-- R1: Implement a registry-driven Silver builder producing exactly the documented Silver schema from retained Bronze history for selected series.
-- R2: For OHLC sources set `value=close` and preserve OHLC; for scalar sources preserve scalar `value` and output null Float64 OHLC columns; retain unit/provider/source identity from registry/source metadata.
-- R3: Require unique `(series_id, observation_date)`, strict date ordering per series, finite non-null `value`, consistent provider/source identity, and never create/fill an absent source date.
-- R4: Diff selected rebuilt Silver against current Silver and rewrite only affected monthly partitions; unchanged rebuild is a physical no-op and unselected series are untouched.
-- R5: Add tests for one OHLC and one scalar source, exact dtypes/order, duplicate rejection, non-finite rejection, identity mismatch, preserved source gaps, revision, and no-op physical preservation.
+- R1: Registry-driven Silver builder/repository produces exact canonical schema from selected retained Bronze.
+- R2: OHLC maps `value=close` and preserves OHLC; scalar preserves value and null Float64 OHLC; identity/unit consistent.
+- R3: Require unique key, strict per-series date order, finite non-null value, consistent provider/source; never create missing dates.
+- R4: Diff and rewrite only affected monthly Silver partitions; identical rebuild physical no-op; unselected series untouched.
+- R5: Add OHLC/scalar/schema/dtype/duplicate/non-finite/identity/gap/revision/no-op tests.
 
 Acceptance:
-- A1 (verifies R1): Output column order/types equal the Silver contract exactly.
-- A2 (verifies R2): OHLC/scalar fixtures produce exact stated mappings and nullable OHLC dtypes.
-- A3 (verifies R3): Every duplicate/non-finite/identity-invalid fixture fails and an absent date remains absent.
-- A4 (verifies R4): Revision rewrites only its affected month; identical rebuild changes no Silver file hash/mtime; unselected series stay untouched.
-- A5 (verifies R5): All stated Silver cases pass offline.
+- A1 (verifies R1): exact schema/order/types.
+- A2 (verifies R2): both source shapes map exactly.
+- A3 (verifies R3): all invalid/gap rules pass.
+- A4 (verifies R4): revision touches one month; no-op/unselected unchanged physically.
+- A5 (verifies R5): all cases pass offline.
 
 ## PR-14: Add Lake Inventory CLI
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
@@ -754,24 +747,24 @@ Depends on: PR-11, PR-12
 Commit: `feat(pr-14): add lake inventory cli`
 
 Description:
-- R1: Add a non-mutating `inventory` CLI that reads authoritative `dataset_inventory.parquet` and outputs stable fields `series_id`, provider, min date, max date, row count, duplicate count, and file count.
-- R2: Add repeatable/non-mutating `--series` and `--provider` filters validated against the registry/provider set; unknown filters fail rather than silently returning unrelated rows.
-- R3: Add deterministic `--json` output with exactly the same logical field names/values and stable ordering as text/tabular output.
-- R4: Empty registered series/filtered results are valid successful output; config/unknown-filter/read/schema failures are non-zero and do not modify any lake file.
-- R5: Add parser/output tests for unfiltered, series filter, provider filter, combined filter, JSON, empty registered series, unknown filter, and corrupt/missing inventory.
+- R1: Command adapter `inventory` reads inventory repository and renders exactly seven stable fields.
+- R2: Repeatable `--series`/`--provider` filters validate registry/provider values; unknown fails; no lake mutation.
+- R3: Deterministic `--json` has same logical fields/order/values.
+- R4: Empty valid result exits zero; config/read/schema/unknown-filter exits non-zero without mutation.
+- R5: Add parser/render/filter/json/empty/corrupt-missing tests.
 
 Acceptance:
-- A1 (verifies R1): Fixed fixtures produce exactly the seven documented fields per row in stable order.
-- A2 (verifies R2): Valid filters return only matching rows; unknown values fail non-zero; before/after lake hashes prove no mutation.
-- A3 (verifies R3): JSON and text representations contain equivalent logical values/order.
-- A4 (verifies R4): Empty valid selection exits zero; each stated read/config/schema failure exits non-zero without lake mutation.
-- A5 (verifies R5): All listed CLI cases pass offline.
+- A1 (verifies R1): exact text fields/order.
+- A2 (verifies R2): filter/unknown/no-mutation behavior passes.
+- A3 (verifies R3): JSON/text logical equivalence passes.
+- A4 (verifies R4): exact exit semantics pass.
+- A5 (verifies R5): all cases pass offline.
 
-## PR-15: Build Volatility Gold Features On Canonical Timestamp
+## PR-15: Build Volatility Gold Feature Family
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
@@ -786,26 +779,26 @@ Depends on: PR-13
 Commit: `feat(pr-15): add volatility regime features`
 
 Description:
-- R1: Convert Silver `observation_date` to first-column `timestamp_m1` at exact `00:00:00.000000 UTC`, cast to Polars `Datetime(time_unit="us", time_zone="UTC")`, remove `observation_date`, and retain one row per union source date needed by this feature family.
-- R2: For each `vix`, `vix9d`, `vix3m`, `vix6m`, `vix1y`, `vstoxx`, `move`, output exact columns `<series>_level`, `<series>_delta_5obs`, `<series>_delta_20obs`, `<series>_zscore_60obs` using the global Gold feature-math contract.
-- R3: Output exact term columns `vix9d_vix_ratio`, `vix_vix3m_ratio`, `vix3m_minus_vix`, `vix6m_minus_vix`, `vix1y_minus_vix`; calculate only on same timestamp and return null on missing required input or zero denominator.
-- R4: Do not fill source gaps. Observation-lag operations count previous valid observations for that series, z-score uses last 60 valid observations including current with `ddof=0`, and all outputs are null until their stated minimum history exists.
-- R5: Define deterministic output column order: `timestamp_m1`, then series in registry order with their four columns, then the five term columns; all feature columns are `Float64` nullable.
-- R6: Add hand-calculable tests for UTC timestamp conversion/type, exact names/order/dtypes, 5/20 observation-lag delta (including calendar gaps), 60-value z-score/ddof, zero variance, ratio denominator zero, missing same-day input, and no future leakage.
+- R1: Convert Silver dates to unique/sorted first-column UTC-midnight `timestamp_m1: Datetime(us,UTC)`; remove `observation_date`; union family source dates only.
+- R2: For `vix,vix9d,vix3m,vix6m,vix1y,vstoxx,move` output exact `<series>_level`, `_delta_5obs`, `_delta_20obs`, `_zscore_60obs` using global math.
+- R3: Output exact `vix9d_vix_ratio,vix_vix3m_ratio,vix3m_minus_vix,vix6m_minus_vix,vix1y_minus_vix`; same timestamp only, null on missing/zero denominator.
+- R4: No fill; observation lags count valid observations; 60-value `ddof=0`; insufficient/zero variance null.
+- R5: Deterministic schema order: timestamp, each series in registry order with four features, then term features; nullable Float64.
+- R6: Add hand-calculable timestamp/delta-gap/zscore/zero-variance/ratio/missing/no-future tests.
 
 Acceptance:
-- A1 (verifies R1): Fixed date maps exactly to UTC midnight, timestamps are unique/sorted `Datetime(us, UTC)`, and `observation_date` is absent.
-- A2 (verifies R2): All seven series expose the exact four named features and hand-calculated deltas use observation lags rather than calendar-day subtraction.
-- A3 (verifies R3): All five exact term columns match hand fixtures and required-missing/zero denominator returns null.
-- A4 (verifies R4): Gap fixtures prove no fill; 59 valid values remain z-score-null; the 60th matches population-standard-deviation result; zero variance is null.
-- A5 (verifies R5): Full column list/order/dtypes match one explicit expected schema.
-- A6 (verifies R6): Every stated formula/timestamp/leakage case passes offline.
+- A1 (verifies R1): exact timestamp contract/no observation_date.
+- A2 (verifies R2): all 28 series features/formulas exact.
+- A3 (verifies R3): five term features/null rules exact.
+- A4 (verifies R4): gap/59th/60th/zero-variance tests exact.
+- A5 (verifies R5): full expected schema/order/types exact.
+- A6 (verifies R6): all cases pass offline.
 
-## PR-16: Build Macro, Credit, Rates, And Dollar Gold Features
+## PR-16: Build Macro/Credit/Rates/USD Gold Feature Family
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
@@ -820,26 +813,26 @@ Depends on: PR-13
 Commit: `feat(pr-16): add macro regime features`
 
 Description:
-- R1: Convert Silver dates to canonical first-column `timestamp_m1: Datetime(us, UTC)` at UTC midnight, remove `observation_date`, and retain the union of source dates for this feature family without filling gaps.
-- R2: Output exact CISS columns `ciss_level`, `ciss_delta_5obs`, `ciss_delta_20obs`, `ciss_zscore_60obs` and Euro HY columns `euro_hy_oas_level`, `euro_hy_oas_delta_5obs`, `euro_hy_oas_delta_20obs`, `euro_hy_oas_zscore_60obs` using the global feature-math contract.
-- R3: Output `us_2y_level`, `us_2y_delta_20obs`, `us_10y_level`, `us_10y_delta_20obs`, and `us_10y_minus_us_2y`; yield spread exists only with same-timestamp values.
-- R4: Output `estr_level`, `estr_delta_20obs`, `usd_broad_level`, `usd_broad_delta_20obs`; absent source dates remain null after family union and are never carried forward/backward.
-- R5: Define deterministic output order exactly as R2 -> R3 -> R4 after `timestamp_m1`; all feature columns are nullable `Float64` and insufficient history/zero-variance z-score is null.
-- R6: Add hand-calculable tests for exact timestamp/name/order/dtype, delta across calendar gaps, 60-observation z-scores with `ddof=0`, missing yield-pair date, no fill, zero variance, and no future leakage.
+- R1: Convert Silver to same canonical family timestamp contract; union source dates without fill.
+- R2: Output CISS and Euro HY `level,delta_5obs,delta_20obs,zscore_60obs`.
+- R3: Output `us_2y_level,us_2y_delta_20obs,us_10y_level,us_10y_delta_20obs,us_10y_minus_us_2y`; spread same timestamp only.
+- R4: Output `estr_level,estr_delta_20obs,usd_broad_level,usd_broad_delta_20obs`; no carry.
+- R5: Deterministic schema order R2->R3->R4 after timestamp; nullable Float64; same history/null rules.
+- R6: Add hand-calculable timestamp/delta-gap/zscore/yield-pair/no-fill/zero-variance/no-future tests.
 
 Acceptance:
-- A1 (verifies R1): Output uses exact unique/sorted UTC `timestamp_m1` and contains no `observation_date` or synthetic gap row beyond union source dates.
-- A2 (verifies R2): CISS/HY columns/formulas exactly match explicit fixtures including z-score minimum history.
-- A3 (verifies R3): Yield levels/deltas/spread match hand values and missing same-day pair yields null spread.
-- A4 (verifies R4): ESTR/USD fixtures match exact values and missing dates are not filled.
-- A5 (verifies R5): Complete expected schema/order/dtypes match exactly and zero variance is null.
-- A6 (verifies R6): All stated macro/timestamp/leakage cases pass offline.
+- A1 (verifies R1): exact timestamp/union/no-fill contract.
+- A2 (verifies R2): CISS/HY features exact.
+- A3 (verifies R3): rates/spread exact including missing pair.
+- A4 (verifies R4): ESTR/USD exact/no carry.
+- A5 (verifies R5): full schema/order/types exact.
+- A6 (verifies R6): all cases pass offline.
 
-## PR-17: Assemble Canonical Daily Gold Frame And Validate Contract
+## PR-17: Assemble And Validate Canonical Gold Frame
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
@@ -854,26 +847,26 @@ Depends on: PR-15, PR-16
 Commit: `feat(pr-17): assemble canonical daily gold frame`
 
 Description:
-- R1: Outer-join the volatility and macro family frames only on `timestamp_m1`, yielding exactly one row per union timestamp and preserving missing-family values as null with no imputation/as-of carry.
-- R2: Define one exact source-controlled ordered schema: canonical timestamp first, then every PR-15 feature in its exact order, then every PR-16 feature in its exact order; reject missing, extra, renamed, reordered, or wrong-dtype columns and forbid `observation_date`.
-- R3: Validate non-empty frame, exact `Datetime(us, UTC)`, UTC-midnight values, unique strictly increasing timestamps, nullable finite Float64 values, and reject positive/negative infinity while allowing null/NaN only according to one explicit policy: normalize feature NaN to null before final validation.
-- R4: Add a causality regression harness that truncates Silver input at cutoff `t`, rebuilds Gold, and asserts all Gold rows/features `<= t` equal the corresponding prefix of a full-history build; use this to detect future leakage in combined features.
-- R5: Keep assembly storage-neutral: no build-ID generation, filesystem writes, hashing, JSON, plots, catalog mutation, publication, or retention imports/side effects.
-- R6: Add tests for family outer join, exact full schema, missing/extra/reordered column rejection, duplicate/unsorted timestamp rejection, UTC-midnight validation, NaN normalization/infinity rejection, truncation causality, and storage-neutral boundary.
+- R1: Outer-join feature-family frames only on timestamp; one union row, null preservation, no imputation/as-of carry.
+- R2: Enforce one source-controlled exact ordered Gold schema: timestamp, PR-15 exact columns, PR-16 exact columns; reject missing/extra/renamed/reordered/wrong type/observation_date.
+- R3: Validate non-empty, UTC-midnight exact dtype, unique strictly increasing timestamps; normalize feature NaN to null; reject infinity/non-Float64 feature types.
+- R4: Add truncation causality regression: rebuild from Silver cutoff `t` and assert every Gold value `<=t` equals full-build prefix; deliberately leaky transform must be detected.
+- R5: Keep assembly pure/storage-neutral: no build ID/files/hash/JSON/plot/catalog/publication imports or side effects.
+- R6: Add join/schema/timestamp/NaN/infinity/causality/storage-boundary tests.
 
 Acceptance:
-- A1 (verifies R1): Fixtures yield exactly the union timestamps with correct null preservation and no carried values.
-- A2 (verifies R2): One explicit expected column/dtype list passes and every listed schema drift fails deterministically.
-- A3 (verifies R3): Every timestamp/value-invalid fixture fails except allowed null/NaN-to-null behavior; final frame contains no NaN or infinity.
-- A4 (verifies R4): Multiple fixed cutoff fixtures produce byte/logically identical Gold prefixes and a deliberately leaky test transform is detected by the harness.
-- A5 (verifies R5): Import/static test proves assembly has no physical publication dependencies or side effects.
-- A6 (verifies R6): All stated assembly/contract/causality cases pass offline.
+- A1 (verifies R1): exact union/null/no-carry result.
+- A2 (verifies R2): expected schema passes and every drift case fails.
+- A3 (verifies R3): final frame has no NaN/infinity and invalid timestamps fail.
+- A4 (verifies R4): multiple cutoff tests pass and leaky control fails.
+- A5 (verifies R5): static/import tests prove no physical dependency.
+- A6 (verifies R6): all cases pass offline.
 
-## PR-18: Add Immutable Versioned Gold Parquet Storage
+## PR-18: Add Immutable Gold Build Store Repository
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
@@ -885,29 +878,29 @@ Agent lane: Agent A
 
 Depends on: PR-17
 
-Commit: `feat(pr-18): add immutable gold build storage`
+Commit: `feat(pr-18): add immutable gold build store`
 
 Description:
-- R1: Define build IDs from an injected UTC build time in exact second-resolution `YYYYMMDDTHHMMSSZ`; reject non-UTC input, malformed IDs, and reuse of an existing build directory.
-- R2: Create a new build directory on the destination filesystem, write `data.parquet` to a same-directory temp, validate readback schema/row count/timestamp bounds, fsync where supported, then atomically rename to final `data.parquet`; never overwrite or merge an existing final artifact.
-- R3: Compute and return deterministic SHA-256 of the final Parquet bytes plus `row_count`, `min_timestamp`, `max_timestamp`; these values are inputs to later sidecar/catalog publication.
-- R4: Provide explicit-build reader by exact build ID/path only; never perform implicit `latest`, mtime, glob-max, or lexicographic selection.
-- R5: Treat a partially created directory without valid final Parquet as an incomplete attempted build that explicit reader rejects; do not auto-promote/overwrite it.
-- R6: Add tests for exact ID, UTC validation, same-second collision, exact path, schema/timestamp preservation, hash repeatability for the written bytes, injected write/readback failure, overwrite rejection, partial directory rejection, and coexistence/readback of two builds.
+- R1: Build ID from injected UTC second `YYYYMMDDTHHMMSSZ`; reject non-UTC/malformed/reused build directory.
+- R2: GoldBuildStore creates directory, writes same-dir temp Parquet, validates readback schema/rows/bounds, fsync where supported, atomically names final; creation-only.
+- R3: Return deterministic final-byte SHA-256, row count, min/max timestamp, ordered columns and semantic versions.
+- R4: Explicit build reader requires build ID; no latest/glob/mtime selection; validates final Parquet.
+- R5: Partial directory/final absence is incomplete and rejected; restart never overwrites/promotes it.
+- R6: Add ID/collision/path/readback/hash/interruption/overwrite/partial/coexistence tests.
 
 Acceptance:
-- A1 (verifies R1): Fixed UTC time yields exact expected ID; malformed/non-UTC/reused IDs fail before changing an existing build.
-- A2 (verifies R2): Success leaves one valid final Parquet/no temp; every injected pre-final failure leaves no authoritative final artifact and cannot alter an existing build.
-- A3 (verifies R3): Metadata equals independent read/hash calculation on final artifact.
-- A4 (verifies R4): Reading build A always returns A regardless of newer build B/mtime/order.
-- A5 (verifies R5): Partial build directory is never selected/read as complete and a new run cannot silently overwrite it.
-- A6 (verifies R6): All stated storage/identity/failure cases pass offline.
+- A1 (verifies R1): exact ID/invalid/collision semantics.
+- A2 (verifies R2): success/failure atomic creation semantics exact.
+- A3 (verifies R3): metadata/hash independently match file.
+- A4 (verifies R4): explicit A never resolves B.
+- A5 (verifies R5): partial directory remains incomplete/unpromoted.
+- A6 (verifies R6): all cases pass offline.
 
-## PR-19: Add Gold Parquet Catalog And Consumer Resolution
+## PR-19: Add Gold Catalog Repository And Resolution Strategies
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
@@ -919,29 +912,29 @@ Agent lane: Agent B
 
 Depends on: PR-17
 
-Commit: `feat(pr-19): add gold catalog and resolution`
+Commit: `feat(pr-19): add gold catalog and resolution strategies`
 
 Description:
-- R1: Define root `manifest.parquet` with exact ordered typed fields: `dataset_id`, `build_id`, `status`, `current`, `started_at_utc`, `completed_at_utc`, `schema_version`, `feature_version`, `min_timestamp`, `max_timestamp`, `row_count`, `data_path`, `build_manifest_path`, `plot_path`.
-- R2: Define `schema_version=1` and `feature_version=1` as source-controlled constants; catalog code receives them explicitly and never auto-increments them.
-- R3: Persist the catalog with deterministic row ordering `(started_at_utc, build_id)` and same-directory atomic replacement; `build_id` is unique, allowed status is only `building|complete|failed`, and before first publication zero current rows is valid.
-- R4: Validate state invariants: only complete may be current; after a successful publication exactly one current; selectable complete requires non-null existing three artifact paths whose build IDs agree; `completed_at_utc`, row/timestamp metadata are required for complete; building/failed are never selectable.
-- R5: Implement pure consumer resolution from catalog: supported compatible current first; else newest compatible selectable complete by `(completed_at_utc DESC, build_id DESC)`; compatibility is exact membership in caller-supported schema/feature version sets.
-- R6: Add tests for exact schema/order/types, semantic-version constants, duplicate/status/current/path mismatch, missing physical artifact, deterministic ordering, current-compatible selection, incompatible-current fallback, and no filesystem-recency selection.
+- R1: Define exact 15-field catalog schema including `pruned_at_utc`; source-controlled semantic versions start `1/1` and never auto-bump.
+- R2: GoldCatalogRepository atomically persists deterministic `(started_at_utc,build_id)` ordering; unique ID; statuses only `building|complete|failed`.
+- R3: Validate pure logical invariants only: current only complete; at most one current; complete metadata required; pruned row has non-null `pruned_at_utc` and all three artifact paths null; selectable complete is non-pruned with all paths non-null and syntactically inside matching build ID. Do not inspect filesystem existence.
+- R4: Define `ResolutionPolicy` Strategy `strict_current` (default) and `latest_compatible`; both filter exact caller-supported schema/feature sets and never select building/failed/pruned.
+- R5: `strict_current` fails on incompatible/unselectable current; `latest_compatible` prefers compatible current else newest compatible selectable complete by completed time/build ID; no filesystem query.
+- R6: Add schema/version/state/path-shape/pruned/current/policy/fallback/order/no-filesystem tests.
 
 Acceptance:
-- A1 (verifies R1): One explicit schema fixture matches exactly and old `min_date|max_date` fields are absent.
-- A2 (verifies R2): Version constants equal `1/1`; runtime inputs cannot trigger implicit bump.
-- A3 (verifies R3): Atomic round-trip preserves deterministic ordering and invalid duplicate/status conditions fail.
-- A4 (verifies R4): Every stated invalid state/path/build-ID/metadata combination is rejected; zero-current pre-publication passes.
-- A5 (verifies R5): Fixtures prove exact current preference/fallback ordering/version filtering and never inspect mtime/glob order.
-- A6 (verifies R6): All catalog/resolution cases pass offline.
+- A1 (verifies R1): exact schema has 15 fields/1-1 constants and no legacy date fields.
+- A2 (verifies R2): deterministic atomic round-trip and invalid duplicate/status fail.
+- A3 (verifies R3): every logical/pruned/path-shape invalid case fails while repository performs no existence checks.
+- A4 (verifies R4): both strategies substitute through one interface with exact version filtering.
+- A5 (verifies R5): strict/fallback/order semantics are exact and filesystem spy is untouched.
+- A6 (verifies R6): all cases pass offline.
 
-## PR-20: Generate Immutable Gold Build JSON And Feature Profile
+## PR-20: Generate Immutable Build Manifest And Feature Profile
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
@@ -956,30 +949,30 @@ Depends on: PR-18
 Commit: `feat(pr-20): add gold build sidecars`
 
 Description:
-- R1: Generate immutable UTF-8 `versions/build_id=<id>/manifest.json` with exact required keys `dataset_id`, `build_id`, `schema_version`, `feature_version`, `status`, `started_at_utc`, `completed_at_utc`, `rows_out`, ordered `columns`, `min_timestamp`, `max_timestamp`, `data_path`, `data_sha256`, `feature_set_hash`, `git_commit_hash`, and `plot_path`; serialize with stable sorted keys/separators and ISO UTC values.
-- R2: Compute `feature_set_hash` deterministically from exact Gold ordered column names+dtypes+formula/version contract and capture `git_commit_hash` from an injected/source-control service; do not use wall-clock/random identity in these hashes.
-- R3: Generate immutable `feature_profile.png` from exactly the published Gold frame using a deterministic plotting service analogous to `crypto-history-loader`; exclude `timestamp_m1`, plot only numeric features in canonical column order, and include no random sampling/current-time text.
-- R4: Existing build `manifest.json` or `feature_profile.png` is creation-only and never overwritten; successful build bundle requires valid Parquet, JSON, and non-empty valid PNG all sharing the same build identity/metadata.
-- R5: Plot/JSON failure leaves that build incomplete and propagates to caller; do not mutate root sidecars/catalog in this PR.
-- R6: Add tests for exact JSON schema/serialization, source/build/hash metadata, deterministic feature-set hash, injected git hash, exact paths, PNG validity/order/exclusions, creation-only behavior, identity mismatch, and sidecar failure propagation.
+- R1: Generate deterministic creation-only build `manifest.json` with exact artifact concepts: dataset/build identity, `artifact_state="built"`, schema/feature versions, build start/completion timestamps, rows, ordered columns, bounds, data path/SHA, feature-set hash, Git commit hash, plot path. Do not use catalog `building|complete|failed` status.
+- R2: Compute deterministic feature-set SHA-256 from semantic versions + ordered names/dtypes + documented formula parameters; Git identity is injected and required except explicit deterministic test fallback.
+- R3: Generate creation-only deterministic `feature_profile.png` from exact frame; numeric features in canonical order; timestamp excluded; no random sampling/wall-clock labels.
+- R4: Validate Parquet/JSON/PNG bundle identity/hash/bounds/path/PNG before publication-ready; existing sidecar target never overwritten.
+- R5: JSON/plot failure leaves incomplete immutable attempt and never mutates root catalog/materialized views.
+- R6: Add exact JSON bytes/schema/hash/Git/PNG/order/exclusion/overwrite/mismatch/failure tests.
 
 Acceptance:
-- A1 (verifies R1): Fixed build emits exact required key set/values with deterministic bytes and matching Parquet metadata/hash.
-- A2 (verifies R2): Same contract yields same feature hash; one formula/schema/version change yields different hash; injected git commit is preserved exactly.
-- A3 (verifies R3): PNG is non-empty/valid and plot input order is canonical numeric features with no timestamp/random/time-dependent content.
-- A4 (verifies R4): Valid bundle identities agree; second write to either final sidecar fails without changing existing bytes.
-- A5 (verifies R5): Injected JSON/plot failures leave root publication untouched and caller receives failure.
-- A6 (verifies R6): All stated sidecar/reproducibility/immutability cases pass offline.
+- A1 (verifies R1): exact required artifact key set/values and no publication-status ambiguity.
+- A2 (verifies R2): stable hash; formula/schema/version change changes hash; injected Git preserved.
+- A3 (verifies R3): valid deterministic PNG/input order/exclusion.
+- A4 (verifies R4): bundle validation and creation-only behavior exact.
+- A5 (verifies R5): injected failures leave root state untouched.
+- A6 (verifies R6): all cases pass offline.
 
-## PR-21: Publish Gold Bundle And Root Sidecars Transactionally
+## PR-21: Publish Gold With State Machine, Unit Of Work, And Materialized Views
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
-Git branch: `pr-21/transactional-gold-publication`
+Git branch: `pr-21/gold-publication-state-machine`
 
 Git status: `not-started (branch absent)`
 
@@ -987,31 +980,31 @@ Agent lane: Integration; one agent only
 
 Depends on: PR-19, PR-20
 
-Commit: `feat(pr-21): publish gold bundle transactionally`
+Commit: `feat(pr-21): publish gold with catalog state machine`
 
 Description:
-- R1: Implement publication state machine `new attempt -> catalog building,current=false -> immutable Parquet -> immutable JSON -> immutable PNG -> validate bundle -> complete/current commit`; prior current remains authoritative until final commit.
-- R2: Validate candidate bundle before promotion: exact schema/version/build identity, Parquet SHA/row/timestamp bounds, build JSON identity/hash/path fields, valid plot, and all artifact paths inside the expected build directory.
-- R3: Build next root catalog and deterministic root `manifest.json` mirror in staging; copy/stage candidate `feature_profile.png`; replace root JSON/PNG with rollback backups, then replace authoritative root `manifest.parquet` last as the commit point.
-- R4: On any pre-commit failure, restore prior root JSON/PNG/catalog and prior current selection; mark attempt `failed,current=false` in a later safe catalog write only if doing so preserves prior current. No failed/incomplete bundle is selectable.
-- R5: After successful commit, verify root JSON `current_build_id` and build records mirror catalog and root PNG bytes equal the selected current build PNG; if post-commit verification fails, return a hard operational error without pretending the catalog commit did not happen.
-- R6: Add explicit restart recovery for catalog rows left `building`: if no authoritative commit selected that build, recovery marks it failed after validating it is non-current; never infer completion from version-directory/file existence.
-- R7: Add failure-injection tests after each build artifact, each root staging/replacement point, before catalog replace, and post-commit verification; add successful publication, first publication, prior-current preservation, and interrupted-building recovery tests.
+- R1: Implement publication State Machine: register `building,current=false`; create/validate immutable bundle; on build failure atomically finalize attempted row `failed,current=false`; previous current never changes.
+- R2: Before promotion physically validate candidate via GoldBuildStore: exact schema/version/build ID, Parquet SHA/rows/bounds, build JSON identity/hash/path, valid PNG, containment in expected build directory.
+- R3: Promotion Unit of Work atomically replaces authoritative catalog with new `complete,current=true` and old current demoted; this catalog replace is the only publication commit point.
+- R4: Implement root `manifest.json` and `feature_profile.png` as `GoldMaterializedViewWriter`: after each successful catalog mutation regenerate from catalog/current bundle; never use them as commit authority or selection input.
+- R5: If materialized-view refresh fails after catalog commit, return hard operational error but preserve catalog truth; startup/publication entry reconciles stale/missing root views from catalog/current bundle.
+- R6: Recover stale non-current `building` rows to `failed`; never infer completion from filesystem presence. A current `building` row is invalid and stops publication for manual/invariant recovery.
+- R7: Add failure-injection/state/promotion/physical-integrity/materialized-view/reconciliation/stale-building/first/subsequent publication tests.
 
 Acceptance:
-- A1 (verifies R1): State-transition fixtures prove only fully validated bundle reaches complete/current and old current persists until commit point.
-- A2 (verifies R2): Every metadata/hash/path mismatch prevents promotion.
-- A3 (verifies R3): Success has exactly one current, deterministic matching root JSON/PNG, and event trace proves Parquet catalog replacement is last authority switch.
-- A4 (verifies R4): Every injected pre-commit failure leaves old authoritative root state/current intact and failed attempt unselectable.
-- A5 (verifies R5): Success consistency check passes; injected post-commit mismatch reports hard error while catalog truth remains the committed source of authority.
-- A6 (verifies R6): Restart fixture converts stale non-current building -> failed and never promotes based on files/mtime.
-- A7 (verifies R7): All stated failure/restart/success scenarios pass offline.
+- A1 (verifies R1): only fully built candidate can continue; build failure leaves old current and failed attempt.
+- A2 (verifies R2): every physical metadata/hash/path mismatch prevents promotion.
+- A3 (verifies R3): exactly one current after success and event trace proves catalog replacement is commit point.
+- A4 (verifies R4): root views exactly derive from catalog/current and are never read by resolver.
+- A5 (verifies R5): post-commit view failure reports error, catalog remains new authority, next reconciliation repairs views.
+- A6 (verifies R6): stale building is never promoted; invalid current-building stops safely.
+- A7 (verifies R7): all stated scenarios pass offline.
 
-## PR-22: Add Gold Build-Bundle Retention
+## PR-22: Add Safe Gold Retention With Mark-And-Sweep
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
@@ -1023,29 +1016,29 @@ Agent lane: Foundation; first free agent
 
 Depends on: PR-21
 
-Commit: `feat(pr-22): retain recent gold build bundles`
+Commit: `feat(pr-22): add mark and sweep gold retention`
 
 Description:
-- R1: Add `gold_retention_successful_builds` with default `5`, meaning five physically retained complete build directories including current for each `(schema_version, feature_version)` pair.
-- R2: Retention runs only after successful publication/recovery has no active ambiguity; sort eligible non-current complete builds by `(completed_at_utc ASC, build_id ASC)` and prune oldest beyond limit.
-- R3: Treat build directory as one bundle: delete `data.parquet`, `manifest.json`, `feature_profile.png`, then remove empty build directory; never prune current, building, failed, another semantic version pair, or a bundle whose identity/path validation fails.
-- R4: After successful physical prune, atomically update audit catalog row by setting `data_path`, `build_manifest_path`, `plot_path` to null while retaining immutable audit metadata/hash/version/timestamps; it becomes unselectable.
-- R5: If deletion is partial/fails, do not null catalog paths or pretend success; surface an operational error and require consistency recovery. Consumer resolver must reject a selectable row whose required bundle is partial/missing.
-- R6: Add tests for defaults/custom limit, current protection, version isolation, exact ordering, full deletion, injected partial-delete failure, retained audit row, and resolver rejection of partial selectable bundle.
+- R1: Default retain five physical complete builds including current per `(schema_version,feature_version)` pair; deterministic oldest non-current ordering by completed time/build ID.
+- R2: Mark phase: validate eligible non-current complete/non-pruned row then atomically set all artifact paths null and `pruned_at_utc=injected_now`; current/building/failed/other-version never marked.
+- R3: Sweep phase: only after successful mark delete `data.parquet,manifest.json,feature_profile.png` and empty directory; missing already-marked files are idempotent success.
+- R4: Sweep interruption/failure leaves catalog safely unselectable and physical orphan(s); return operational error and retry orphan cleanup later. Never restore selectability automatically.
+- R5: Resolver never returns marked row; repeated retention/cleanup idempotent; root materialized views are refreshed if catalog audit representation changes.
+- R6: Add default/custom/order/current/version/mark-before-delete/partial-delete/orphan-retry/idempotency/resolver tests.
 
 Acceptance:
-- A1 (verifies R1): Default never retains more than five complete physical bundles per semantic pair including current after successful retention.
-- A2 (verifies R2): Six eligible fixed builds prune exactly oldest allowed bundle and ordering tie breaks by build ID.
-- A3 (verifies R3): Protected/invalid identities remain untouched; valid prune removes all three files and directory.
-- A4 (verifies R4): Successful pruned row remains audit-visible with all three paths null and cannot resolve.
-- A5 (verifies R5): Injected partial deletion preserves non-null catalog paths, returns error, and partial selectable bundle fails consistency/resolution instead of being silently selected.
-- A6 (verifies R6): All stated retention/failure/selection cases pass offline.
+- A1 (verifies R1): retained count/order exact per semantic pair.
+- A2 (verifies R2): catalog tombstone occurs before any delete and protected rows untouched.
+- A3 (verifies R3): valid sweep removes whole bundle; already-marked missing file is safe retry.
+- A4 (verifies R4): injected partial delete leaves unselectable catalog plus retryable orphan, never dangling selectable path.
+- A5 (verifies R5): policy/resolution/repeated runs/view refresh are exact.
+- A6 (verifies R6): all cases pass offline.
 
-## PR-23: Add Daily Medallion Pipeline And CLI
+## PR-23: Add Daily Medallion Pipeline And Operational CLI
 
 Status: Planned
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 PR: none
 
@@ -1060,44 +1053,40 @@ Depends on: PR-14, PR-21, PR-22
 Commit: `feat(pr-23): add daily medallion pipeline`
 
 Description:
-- R1: Add CLI commands `bootstrap`, `update`, `silver-build`, `gold-build`, `inventory`, and `run-daily`; all command parsing/config validation is in `api/`, use cases in `application/`, and `gold-build` publishes only through the PR-21 service.
-- R2: `run-daily` order is selected Bronze update -> selected/all Silver rebuild -> full canonical Gold assembly from current Silver -> immutable Parquet -> build JSON -> build PNG -> candidate validation -> root staging -> authoritative catalog publication -> retention -> inventory refresh.
-- R3: Default source processing targets exactly all 13 registry series; repeatable `--series` may restrict Bronze/Silver source execution, but Gold always rebuilds the full canonical schema from all currently available Silver inputs rather than dropping unselected feature columns.
-- R4: Failure semantics: a requested Bronze series failure makes command non-zero but already completed independent Bronze series remain durable; any Silver/Gold failure before publication leaves prior current Gold/root sidecars authoritative; no partial new Gold becomes selectable.
-- R5: Add end-to-end offline fixture covering empty-lake bootstrap, next-day incremental run with one revision and one shortened full-file response, Silver affected-month updates, UTC-midnight Gold, all build/root artifacts, manifest resolution, retention, repeated no-op source rerun, and inventory refresh.
-- R6: On startup/run-daily invoke interrupted-`building` recovery before creating a new build; recovery errors stop Gold publication rather than bypassing catalog ambiguity.
-- R7: Document once-daily cron and systemd examples, required persistent lake path, environment/secret injection, and exit-code/log expectations; explicitly do not add scheduled GitHub Actions ingestion because CI runners do not own the persistent runtime lake.
-- R8: Add CLI/integration tests for default/all selection, repeat filters, unknown series, stage ordering, failure propagation, first run, second run, no-op run, recovery, and `network` marker exclusion.
+- R1: Command adapters `bootstrap,update,reconcile,silver-build,gold-build,inventory,run-daily`; parsing/config/render in `api`, use cases in `application`; Gold publish only PR-21 service.
+- R2: On Gold-capable command entry: recover stale building rows and reconcile root materialized views before creating another build; recovery ambiguity stops publication.
+- R3: `run-daily`: planner chooses incremental/reconcile per selected/all 13 -> Bronze -> Silver -> full canonical Gold from current Silver -> immutable bundle -> physical candidate validation -> atomic catalog promotion -> root view refresh -> mark/sweep retention -> inventory refresh.
+- R4: `--series` restricts Bronze/Silver execution only; Gold always rebuilds full canonical schema from all currently available Silver; unknown series fail.
+- R5: Failure semantics: provider failure makes run non-zero but independent committed Bronze series remain; any pre-promotion Silver/Gold failure leaves old current; post-promotion materialized-view/retention failure returns non-zero but catalog truth is not falsely rolled back.
+- R6: Add structured stdlib logging context `run_id`, command, series/provider where applicable, build ID after creation, stage, status; sanitize secrets; stable exit codes for validation/provider/persistence/publication errors.
+- R7: End-to-end offline regression covers empty bootstrap, next-day incremental revision, scheduled full reconciliation of an older revision, shortened source, affected Silver months, Gold causality/schema, publication/materialized views, strict/fallback resolution, retention mark/sweep, no-op rerun, inventory.
+- R8: Document daily cron/systemd examples, persistent lake path, FRED secret injection, reconcile interval, auto-recovery semantics, logs/exit codes; no scheduled GitHub Actions ingestion.
 
 Acceptance:
-- A1 (verifies R1): All commands parse, respect layer boundaries, and Gold outputs only through publication service with exact timestamp/schema contract.
-- A2 (verifies R2): Integration tracing proves the stated stage order and successful output contains all immutable build artifacts plus all three root Gold sidecars.
-- A3 (verifies R3): Defaults target exactly 13 series and repeatable filters restrict only requested source execution without altering full Gold column contract.
-- A4 (verifies R4): Injected provider/Silver/Gold failures return non-zero with exact documented durable-state behavior and no partial Gold selection.
-- A5 (verifies R5): The complete bootstrap/delta/revision/truncation/timestamp/publication/resolution/idempotency/retention/inventory scenario passes offline.
-- A6 (verifies R6): Interrupted-building recovery is deterministic and never promotes by filesystem recency/presence.
-- A7 (verifies R7): README documents both scheduler examples/runtime requirements and no scheduled GitHub Actions data-ingestion workflow exists.
-- A8 (verifies R8): Required integration gate remains network-free and marker tests prove `network` tests are excluded.
+- A1 (verifies R1): all commands parse and layer boundaries/Gold publication path are exact.
+- A2 (verifies R2): stale/reconciliation cases repair or stop before new publication.
+- A3 (verifies R3): integration trace proves exact stage order including periodic reconcile and catalog-before-view semantics.
+- A4 (verifies R4): default 13/filter/unknown/full-Gold behavior exact.
+- A5 (verifies R5): failure injection proves exact pre/post commit durable truth.
+- A6 (verifies R6): log/exit fixtures contain required context and no secret.
+- A7 (verifies R7): full bootstrap/incremental/reconcile/revision/publication/resolution/retention/no-op scenario passes offline.
+- A8 (verifies R8): README documents runtime scheduling/config and no scheduled CI ingestion exists.
 
 ## Definition Of MVP Complete
 
-The MVP is complete only when PR-01 through PR-23 are merged and all of the following are true:
+MVP is complete only when PR-01 through PR-23 are merged and:
 
-- every implementation branch/commit follows the `pr-XX` Git naming contract and backlog Git metadata is current;
-- local pre-push and remote push/PR/merge quality gates run `lint`, `type`, `unit`, and offline `integration` in parallel, require the `coverage` aggregation check, enforce combined production-code line coverage `>=90.0%`, and `main` cannot merge with any required check failing;
-- an empty lake can bootstrap every available initial source series to the maximum history exposed by its configured open/public provider;
-- subsequent source runs fetch/refetch only the planner-approved delta/correction scope and remain duplicate-safe, restart-safe, and no-op safe;
-- upstream source-window truncation never deletes older locally retained Bronze history;
-- Bronze, Silver, Gold, state, operational manifests, and Gold catalogs use the documented Polars/Parquet contracts;
-- Silver remains daily long-form with `observation_date: Date`;
-- Gold uses only canonical `timestamp_m1: Datetime(time_unit="us", time_zone="UTC")` as temporal key and does not misrepresent UTC midnight as information availability time;
-- every Gold feature formula, observation-lag rule, rolling-window rule, same-timestamp join rule, schema version, and feature version is explicit and tested;
-- Gold contains reusable causal market-state features only and no HMM states, regime labels, targets, portfolio weights, or trading decisions;
-- each successful Gold build is an immutable `data.parquet + manifest.json + feature_profile.png` bundle with reproducibility metadata/hashes;
-- root `manifest.parquet`, `manifest.json`, and `feature_profile.png` remain consistent, with `manifest.parquet` the sole authoritative current-selection catalog;
-- interrupted `building` attempts are restart-safe and are never auto-promoted by filesystem discovery;
-- consumers can select current/compatible builds without filesystem recency logic;
-- retention keeps the configured complete build bundles per semantic version pair without deleting current or silently accepting partial selectable bundles;
-- `run-daily` can be scheduled once per day, preserves separately durable Bronze successes, and never publishes partial Gold state;
-- required integration tests are offline; live-provider checks, if later added, are marked `network` and excluded from push/merge requirements;
-- `README.md`, `ARCHITECTURE.md`, and this backlog remain synchronized with the implementation they describe.
+- `main` is actually protected with the five required checks, squash-only PR merging, auto-merge enabled, and no direct/force/delete path;
+- implementation branches/commits follow the PR Git contract;
+- local/remote gates run four execution checks in parallel plus combined production coverage >=90%;
+- application follows documented ports/adapters and no provider conditional ladder leaks into orchestration;
+- bootstrap/incremental/periodic reconcile are restart-safe, no-op safe, and detect historical revisions beyond overlap without inferring deletions from omission;
+- Bronze/Silver use exact contracts, monthly affected-partition writes, and no synthetic observations;
+- Gold uses only canonical UTC `timestamp_m1`, explicit causal feature math, no NaN/infinity, and explicit semantic versions;
+- every build is immutable Parquet + artifact manifest + deterministic plot with reproducibility hashes;
+- build JSON never conflicts with catalog publication state because publication lifecycle exists only in `manifest.parquet`;
+- catalog resolution is pure/policy-driven, strict-current by default, filesystem-recency independent;
+- atomic catalog replacement is the Gold publication commit point; root JSON/PNG are recoverable materialized views;
+- retention tombstones catalog rows before deleting bundles and cannot create a selectable partial bundle;
+- daily pipeline logs deterministic context, handles pre/post commit failures correctly, and remains network-free in required integration tests;
+- README, ARCHITECTURE, AGENTS, and BACKLOG remain synchronized.
