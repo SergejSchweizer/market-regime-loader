@@ -1,0 +1,111 @@
+"""Pure bootstrap/update/reconcile planning for source ingestion."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date, timedelta
+from enum import StrEnum
+
+from application.contracts import FetchCapability, SeriesContract
+from application.ports.lake import ObservationBounds
+
+
+class OperationMode(StrEnum):
+    """Explicit ingestion operations."""
+
+    BOOTSTRAP = "bootstrap"
+    UPDATE = "update"
+    RECONCILE = "reconcile"
+
+
+@dataclass(frozen=True, slots=True)
+class FetchInstruction:
+    """Provider-neutral fetch instruction with a logical acceptance window."""
+
+    mode: OperationMode
+    request_start: date | None
+    request_end: date
+    maximum_history: bool
+    filter_start: date | None
+    filter_end: date | None
+
+
+@dataclass(frozen=True, slots=True)
+class PlannerConfig:
+    """Strict incremental update configuration."""
+
+    overlap_days: int = 7
+
+    def __post_init__(self) -> None:
+        if self.overlap_days < 0:
+            raise ValueError("overlap_days must be >= 0")
+
+
+def choose_mode(bounds: ObservationBounds, *, explicit_reconcile: bool = False) -> OperationMode:
+    """Choose mode solely from authoritative history and explicit operator intent."""
+    if bounds.maximum is None:
+        if explicit_reconcile:
+            raise ValueError("cannot reconcile a series with no Bronze history")
+        return OperationMode.BOOTSTRAP
+    if explicit_reconcile:
+        return OperationMode.RECONCILE
+    return OperationMode.UPDATE
+
+
+def build_plan(
+    contract: SeriesContract,
+    bounds: ObservationBounds,
+    *,
+    today: date,
+    explicit_reconcile: bool = False,
+    config: PlannerConfig = PlannerConfig(),
+) -> FetchInstruction:
+    """Build a deterministic provider-neutral plan from authoritative Bronze bounds."""
+    mode = choose_mode(bounds, explicit_reconcile=explicit_reconcile)
+    latest = bounds.maximum
+
+    if mode is OperationMode.BOOTSTRAP:
+        return FetchInstruction(
+            mode=mode,
+            request_start=None,
+            request_end=today,
+            maximum_history=True,
+            filter_start=None,
+            filter_end=None,
+        )
+
+    if latest is None:
+        raise AssertionError("existing-history mode requires authoritative Bronze maximum")
+    if today < latest:
+        raise ValueError("today cannot be earlier than latest stored observation")
+
+    if mode is OperationMode.RECONCILE:
+        return FetchInstruction(
+            mode=mode,
+            request_start=None,
+            request_end=today,
+            maximum_history=True,
+            filter_start=None,
+            filter_end=None,
+        )
+
+    request_start = latest - timedelta(days=config.overlap_days)
+    if contract.fetch_capability is FetchCapability.DATE_RANGE:
+        return FetchInstruction(
+            mode=mode,
+            request_start=request_start,
+            request_end=today,
+            maximum_history=False,
+            filter_start=request_start,
+            filter_end=today,
+        )
+    if contract.fetch_capability is FetchCapability.FULL_FILE:
+        return FetchInstruction(
+            mode=mode,
+            request_start=None,
+            request_end=today,
+            maximum_history=False,
+            filter_start=request_start,
+            filter_end=today,
+        )
+    raise ValueError(f"unsupported fetch capability: {contract.fetch_capability}")
