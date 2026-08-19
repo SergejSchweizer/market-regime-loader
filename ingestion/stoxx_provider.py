@@ -93,7 +93,9 @@ class StoxxProvider:
 
     def _parse(self, series: SeriesContract, content: bytes) -> pl.DataFrame:
         try:
-            raw = pl.read_csv(BytesIO(content), separator=_delimiter(content), infer_schema_length=1000)
+            raw = pl.read_csv(
+                BytesIO(content), separator=_delimiter(content), infer_schema_length=1000
+            )
         except Exception as exc:
             raise ValueError("invalid STOXX V2TX payload") from exc
         normalized = {name: name.strip().upper() for name in raw.columns}
