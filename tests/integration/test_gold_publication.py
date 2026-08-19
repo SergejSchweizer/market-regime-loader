@@ -100,7 +100,10 @@ def test_first_and_subsequent_publication_materialize_exact_catalog_current_and_
     assert root["build_id"] == first.build_id
     assert root["status"] == "complete"
     assert root["current"] is True
-    assert paths.gold_profile().read_bytes() == paths.gold_build_profile(first.build_id).read_bytes()
+    assert (
+        paths.gold_profile().read_bytes()
+        == paths.gold_build_profile(first.build_id).read_bytes()
+    )
 
     second = publisher.publish(_frame(offset=10.0))
     assert second.build_id == "20260819T020001Z"
@@ -111,7 +114,10 @@ def test_first_and_subsequent_publication_materialize_exact_catalog_current_and_
     assert old.status is GoldBuildStatus.COMPLETE and not old.current
     root = json.loads(paths.gold_manifest_json().read_bytes())
     assert root["build_id"] == second.build_id
-    assert paths.gold_profile().read_bytes() == paths.gold_build_profile(second.build_id).read_bytes()
+    assert (
+        paths.gold_profile().read_bytes()
+        == paths.gold_build_profile(second.build_id).read_bytes()
+    )
 
 
 @pytest.mark.integration
@@ -203,9 +209,10 @@ def test_postcommit_view_failure_preserves_new_catalog_and_next_reconcile_repair
     repair.reconcile()
     root = json.loads(paths.gold_manifest_json().read_bytes())
     assert root["build_id"] == "20260819T020001Z"
-    assert paths.gold_profile().read_bytes() == paths.gold_build_profile(
-        "20260819T020001Z"
-    ).read_bytes()
+    assert (
+        paths.gold_profile().read_bytes()
+        == paths.gold_build_profile("20260819T020001Z").read_bytes()
+    )
 
 
 @pytest.mark.integration
