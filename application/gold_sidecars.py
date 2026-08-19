@@ -46,10 +46,7 @@ def feature_set_sha256(
     formula_parameters: Mapping[str, object] = GOLD_FORMULA_PARAMETERS,
 ) -> str:
     """Hash semantic versions, ordered names/dtypes, and formula-policy parameters."""
-    columns = [
-        {"dtype": str(frame.schema[column]), "name": column}
-        for column in frame.columns
-    ]
+    columns = [{"dtype": str(frame.schema[column]), "name": column} for column in frame.columns]
     payload = {
         "columns": columns,
         "feature_version": feature_version,
