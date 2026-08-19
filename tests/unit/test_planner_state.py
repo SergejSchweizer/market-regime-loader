@@ -49,12 +49,8 @@ def test_full_file_update_keeps_exact_logical_filter_window() -> None:
 
 
 def test_bootstrap_and_reconcile_are_maximum_history_and_explicit() -> None:
-    bootstrap = build_plan(
-        series_contract("us_10y"), ObservationBounds(None, None), today=TODAY
-    )
-    reconcile = build_plan(
-        series_contract("us_10y"), BOUNDS, today=TODAY, explicit_reconcile=True
-    )
+    bootstrap = build_plan(series_contract("us_10y"), ObservationBounds(None, None), today=TODAY)
+    reconcile = build_plan(series_contract("us_10y"), BOUNDS, today=TODAY, explicit_reconcile=True)
     assert bootstrap.mode is OperationMode.BOOTSTRAP
     assert bootstrap.maximum_history
     assert bootstrap.request_start is None
