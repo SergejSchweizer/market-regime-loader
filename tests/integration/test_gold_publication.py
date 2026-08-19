@@ -101,8 +101,7 @@ def test_first_and_subsequent_publication_materialize_exact_catalog_current_and_
     assert root["status"] == "complete"
     assert root["current"] is True
     assert (
-        paths.gold_profile().read_bytes()
-        == paths.gold_build_profile(first.build_id).read_bytes()
+        paths.gold_profile().read_bytes() == paths.gold_build_profile(first.build_id).read_bytes()
     )
 
     second = publisher.publish(_frame(offset=10.0))
@@ -115,8 +114,7 @@ def test_first_and_subsequent_publication_materialize_exact_catalog_current_and_
     root = json.loads(paths.gold_manifest_json().read_bytes())
     assert root["build_id"] == second.build_id
     assert (
-        paths.gold_profile().read_bytes()
-        == paths.gold_build_profile(second.build_id).read_bytes()
+        paths.gold_profile().read_bytes() == paths.gold_build_profile(second.build_id).read_bytes()
     )
 
 
