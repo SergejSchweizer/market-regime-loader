@@ -20,8 +20,11 @@ If documents conflict, stop and fix the documentation contract in the current PR
 - Do not implement a PR until every `Depends on` PR is merged to `main`.
 - Use exactly the `Git branch` defined by the backlog entry.
 - Every non-generated commit must use Conventional Commit format `type(pr-XX): description` with the same PR identifier as the branch.
-- Keep `Git status` in the backlog accurate while work is active.
-- Stop after the PR is pushed, required CI is green, auto-merge is enabled, and the PR is waiting for or has completed merge. Do not start the next PR in the same task.
+- The branch name and every non-generated commit message must contain the same PR identifier as the backlog entry.
+- Before every commit, verify the active branch is exactly the backlog branch and the commit subject matches `^(feat|fix|docs|test|refactor|perf|build|ci|chore)\(pr-XX\): .+` for that PR.
+- Every backlog PR entry must contain `Git branch`, `Git status`, `Commit`, and `Design patterns` metadata.
+- Keep `Git status` in the backlog accurate while work is active. Use `pushed-ci-failing` after a pushed branch has a failing required remote gate, `pushed-ci-green` only when all required remote gates are green, and `merged` only after GitHub reports the PR merged.
+- Stop after the PR is pushed, required CI is green, auto-merge is enabled, and the PR is waiting for or has completed merge. Do not start the next PR in the same task unless orchestration explicitly assigns another dependency-independent PR to a different agent lane.
 
 ## Architecture rules
 
@@ -38,8 +41,11 @@ Mandatory patterns where applicable:
 - **Materialized View** — root Gold `manifest.json` and `feature_profile.png` are rebuildable views of authoritative `manifest.parquet`; they never choose the current build.
 - **Mark-and-Sweep** — retention first makes a non-current build unselectable in the catalog, then garbage-collects its physical bundle.
 - **Command** — CLI subcommands translate arguments/config to application use cases and contain no provider or persistence business logic.
+- **Dependency Injection** — clocks, sleepers, HTTP transports, repositories, provider registries, source-control identity, and policies are supplied from the composition root rather than created inside use cases.
 
-Prefer `typing.Protocol`, immutable dataclasses/Pydantic models, pure functions, and constructor injection over deep inheritance. Do not add an abstract base class merely to share a few lines of code.
+Every PR must state the intended `Design patterns` in `BACKLOG.md`. During implementation, apply those patterns when they materially reduce coupling, clarify lifecycle/ownership, improve substitution in tests, or protect transaction boundaries. Do **not** introduce a pattern only to satisfy a label: if the PR needs no pattern beyond the repository's architectural baseline, record `Architectural baseline only` and keep the implementation simple.
+
+Prefer `typing.Protocol`, immutable dataclasses/Pydantic models, pure functions, and constructor injection over deep inheritance. Do not add an abstract base class merely to share a few lines of code. Prefer composition over inheritance and keep interfaces narrow according to Interface Segregation.
 
 ## Dependency direction
 
@@ -133,6 +139,7 @@ Do not weaken tests, exclude production files from coverage merely to reach 90%,
 - For source ingestion, assert exact request bounds as well as resulting rows/partitions.
 - For persistence, assert logical state and physical invariants where relevant (hash/mtime/no orphan temp/current pointer).
 - For Gold features, use hand-calculable fixtures and truncation/causality regression tests.
+- For architecture-sensitive PRs, add substitution or dependency-direction tests that demonstrate the chosen pattern rather than merely naming it in documentation.
 
 ## Documentation sidecars
 
