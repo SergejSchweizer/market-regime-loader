@@ -124,6 +124,20 @@ class GoldSidecarBuilder:
         self._git_commit_hash = resolved_git
         self._formula_parameters = dict(formula_parameters)
 
+    def feature_set_hash(
+        self,
+        frame: pl.DataFrame,
+        *,
+        schema_version: int = GOLD_SCHEMA_VERSION,
+        feature_version: int = GOLD_FEATURE_VERSION,
+    ) -> str:
+        return feature_set_sha256(
+            frame,
+            schema_version=schema_version,
+            feature_version=feature_version,
+            formula_parameters=self._formula_parameters,
+        )
+
     def build(
         self,
         frame: pl.DataFrame,
@@ -164,11 +178,10 @@ class GoldSidecarBuilder:
             max_timestamp=None if maximum is None else _utc_text(maximum),
             data_path=data_path,
             data_sha256=data_sha256,
-            feature_set_hash=feature_set_sha256(
+            feature_set_hash=self.feature_set_hash(
                 frame,
                 schema_version=schema_version,
                 feature_version=feature_version,
-                formula_parameters=self._formula_parameters,
             ),
             git_commit_hash=self._git_commit_hash,
             plot_path=plot_path,
