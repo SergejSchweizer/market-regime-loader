@@ -149,8 +149,7 @@ def test_canonical_delta_bootstrap_update_noop_and_revision(tmp_path: Path) -> N
     assert revision.revised_rows == 1
     assert revision.written_partitions == 1
     assert (
-        pl.read_parquet(august).filter(pl.col("observation_date") == TODAY).item(0, "value")
-        == 9.9
+        pl.read_parquet(august).filter(pl.col("observation_date") == TODAY).item(0, "value") == 9.9
     )
     runs = read_runs(paths.ingestion_runs())
     assert [run.requested_start for run in runs[-3:]] == [
