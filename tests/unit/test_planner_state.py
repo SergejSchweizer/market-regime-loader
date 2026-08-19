@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import polars as pl
@@ -13,7 +13,6 @@ from application.registry import series_contract
 from application.state import IngestionState, advance_state
 from ingestion.state_repository import read_states, upsert_state, write_states
 
-UTC = timezone.utc
 TODAY = date(2026, 8, 19)
 LATEST = date(2026, 8, 18)
 BOUNDS = ObservationBounds(date(2000, 1, 3), LATEST)
