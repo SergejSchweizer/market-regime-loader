@@ -193,7 +193,7 @@ def test_run_daily_can_only_reach_update_and_series_restricts_bronze_silver_not_
     events: list[dict[str, object]] = []
     pipeline, bronze, silver, publisher, retention, inventory = _pipeline(events=events)
     result = pipeline.run_daily(["vix", "us_10y"], today=TODAY)
-    assert bronze.calls == [(('vix', 'us_10y'), OperationMode.UPDATE, TODAY)]
+    assert bronze.calls == [(("vix", "us_10y"), OperationMode.UPDATE, TODAY)]
     assert silver.build_calls == ["vix", "us_10y"]
     assert set(silver.read_calls) == set(GOLD_SOURCE_SERIES)
     assert publisher.reconcile_count >= 1
