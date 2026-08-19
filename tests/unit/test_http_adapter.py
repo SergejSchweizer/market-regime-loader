@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Callable
+from datetime import date
 from pathlib import Path
 
 import httpx
@@ -8,25 +10,24 @@ import pytest
 
 from application.contracts import Provider
 from application.errors import ProviderHttpError
-from application.ports.http import HttpRequest, HttpTransport, RequestContext
-from application.ports.market_data import MarketDataProvider
+from application.ports.http import HttpRequest, HttpResponse, HttpTransport, RequestContext
+from application.ports.market_data import MarketDataProvider, ProviderRequest
+from application.registry import series_contract
 from application.retry import RetryPolicy
 from ingestion.httpx_adapter import HttpxTransport, TimeoutConfig
 
 CONTEXT = RequestContext(Provider.FRED, "us_10y", "DGS10")
 
 
-def mock_transport(handler: object) -> httpx.MockTransport:
-    return httpx.MockTransport(handler)  # type: ignore[arg-type]
+def mock_transport(handler: Callable[[httpx.Request], httpx.Response]) -> httpx.MockTransport:
+    return httpx.MockTransport(handler)
 
 
 def test_application_does_not_import_httpx() -> None:
     for path in Path("application").rglob("*.py"):
         tree = ast.parse(path.read_text())
         imports = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, (ast.Import, ast.ImportFrom))
+            node for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom))
         ]
         assert not any(
             (isinstance(node, ast.Import) and any(alias.name == "httpx" for alias in node.names))
@@ -37,16 +38,41 @@ def test_application_does_not_import_httpx() -> None:
 
 def test_http_port_and_market_provider_protocol_are_substitutable() -> None:
     class FakeTransport:
-        def send(self, request: HttpRequest, *, context: RequestContext):
-            return None
+        def send(self, request: HttpRequest, *, context: RequestContext) -> HttpResponse:
+            return HttpResponse(200, b"ok", {})
 
     class FakeProvider:
         provider = Provider.FRED
 
-    transport: HttpTransport = FakeTransport()  # type: ignore[assignment]
+        def fetch(self, series, request):
+            return (series.series_id, request.logical_start, request.logical_end)
+
+    transport: HttpTransport = FakeTransport()
     provider: MarketDataProvider = FakeProvider()
-    assert transport.send(HttpRequest("GET", "https://example.test"), context=CONTEXT) is None
+    response = transport.send(HttpRequest("GET", "https://example.test"), context=CONTEXT)
+    request = ProviderRequest("update", date(2026, 8, 11), date(2026, 8, 19), False)
+    assert response.status_code == 200
     assert provider.provider is Provider.FRED
+    assert provider.fetch(series_contract("us_10y"), request) == (
+        "us_10y",
+        date(2026, 8, 11),
+        date(2026, 8, 19),
+    )
+
+
+def test_provider_request_enforces_exact_operation_window_contract() -> None:
+    update = ProviderRequest("update", date(2026, 8, 11), date(2026, 8, 19), False)
+    assert update.logical_start == date(2026, 8, 11)
+    assert update.logical_end == date(2026, 8, 19)
+    assert not update.maximum_history
+    assert ProviderRequest("bootstrap", None, date(2026, 8, 19), True).maximum_history
+    assert ProviderRequest("reconcile", None, date(2026, 8, 19), True).maximum_history
+    with pytest.raises(ValueError, match="bounded logical_start"):
+        ProviderRequest("update", None, date(2026, 8, 19), False)
+    with pytest.raises(ValueError, match="maximum_history"):
+        ProviderRequest("reconcile", None, date(2026, 8, 19), False)
+    with pytest.raises(ValueError, match="after logical_end"):
+        ProviderRequest("update", date(2026, 8, 20), date(2026, 8, 19), False)
 
 
 def test_retry_policy_validation_status_and_delays() -> None:
@@ -58,7 +84,9 @@ def test_retry_policy_validation_status_and_delays() -> None:
         RetryPolicy(multiplier=0.5)
     with pytest.raises(ValueError):
         RetryPolicy(max_delay_seconds=-1)
-    policy = RetryPolicy(max_attempts=4, initial_delay_seconds=1, multiplier=2, max_delay_seconds=3)
+    policy = RetryPolicy(
+        max_attempts=4, initial_delay_seconds=1, multiplier=2, max_delay_seconds=3
+    )
     assert policy.retryable_status(429)
     assert policy.retryable_status(503)
     assert not policy.retryable_status(404)
@@ -70,7 +98,7 @@ def test_retry_policy_validation_status_and_delays() -> None:
 
 
 def test_success_and_explicit_timeout_config() -> None:
-    seen = []
+    seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
@@ -133,9 +161,7 @@ def test_429_and_5xx_retry_with_deterministic_sleep_and_retry_after_cap() -> Non
 
 
 def test_invalid_retry_after_falls_back_to_exponential_delay() -> None:
-    statuses = iter(
-        [httpx.Response(429, headers={"Retry-After": "tomorrow"}), httpx.Response(200)]
-    )
+    statuses = iter([httpx.Response(429, headers={"Retry-After": "tomorrow"}), httpx.Response(200)])
     sleeps: list[float] = []
     transport = HttpxTransport(
         retry_policy=RetryPolicy(max_attempts=2, initial_delay_seconds=0.75),
