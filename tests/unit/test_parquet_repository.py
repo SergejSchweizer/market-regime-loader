@@ -36,8 +36,10 @@ def test_repository_implements_protocol_and_delegates(tmp_path: Path) -> None:
 
 
 def test_protocol_stub_methods_are_executable_for_coverage() -> None:
-    assert MonthlyFrameRepository.read(object(), [], sort_by=[]) is None  # type: ignore[misc]
-    assert MonthlyFrameRepository.observation_bounds(object(), []) is None  # type: ignore[misc]
+    read_stub = getattr(MonthlyFrameRepository, "read")
+    bounds_stub = getattr(MonthlyFrameRepository, "observation_bounds")
+    assert read_stub(object(), [], sort_by=[]) is None
+    assert bounds_stub(object(), []) is None
 
 
 def test_read_zero_one_and_multiple_months_in_key_order(tmp_path: Path) -> None:
@@ -110,9 +112,7 @@ def test_diff_classifies_insert_unchanged_and_revision() -> None:
 
 def test_diff_handles_null_payload_without_losing_existing_identity() -> None:
     schema = {"series_id": pl.String, "observation_date": pl.Date, "value": pl.Float64}
-    existing = pl.DataFrame(
-        [("x", date(2026, 1, 1), None)], schema=schema, orient="row"
-    )
+    existing = pl.DataFrame([("x", date(2026, 1, 1), None)], schema=schema, orient="row")
     incoming = existing.clone()
     diff = repo.diff_frames(existing, incoming, key=["series_id", "observation_date"])
     assert diff.unchanged.height == 1
@@ -222,10 +222,12 @@ def test_atomic_write_tolerates_directory_fsync_open_failure(
     destination = tmp_path / "data.parquet"
     real_open = repo.os.open
 
-    def open_with_directory_failure(path: os.PathLike[str] | str, flags: int) -> int:
+    def open_with_directory_failure(
+        path: os.PathLike[str] | str, flags: int, mode: int = 0o777
+    ) -> int:
         if Path(path) == tmp_path:
             raise OSError("directory fsync unsupported")
-        return real_open(path, flags)
+        return real_open(path, flags, mode)
 
     monkeypatch.setattr(repo.os, "open", open_with_directory_failure)
     repo.atomic_write_parquet(frame([("x", date(2026, 1, 1), 1.0)]), destination)
@@ -283,9 +285,7 @@ def test_monthly_upsert_rejects_missing_or_invalid_date_column(tmp_path: Path) -
             path_for_date=lambda day: month_path(tmp_path, day),
         )
 
-    invalid = pl.DataFrame(
-        {"series_id": ["x"], "observation_date": [1], "value": [1.0]}
-    )
+    invalid = pl.DataFrame({"series_id": ["x"], "observation_date": [1], "value": [1.0]})
     with pytest.raises(TypeError, match="must contain Date"):
         repo.upsert_monthly(
             pl.DataFrame(schema=invalid.schema),
