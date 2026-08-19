@@ -32,7 +32,13 @@ GOLD_CATALOG_SCHEMA = pl.Schema(
 
 
 def _validate_record(record: GoldCatalogRecord) -> None:
-    for name in ("started_at_utc", "completed_at_utc", "min_timestamp", "max_timestamp", "pruned_at_utc"):
+    for name in (
+        "started_at_utc",
+        "completed_at_utc",
+        "min_timestamp",
+        "max_timestamp",
+        "pruned_at_utc",
+    ):
         value = getattr(record, name)
         if value is not None and value.tzinfo is None:
             raise ValueError(f"{name} must be timezone-aware")
@@ -52,8 +58,14 @@ def _validate_record(record: GoldCatalogRecord) -> None:
     if record.current and record.pruned_at_utc is not None:
         raise ValueError("a pruned Gold build cannot be current")
     if record.status is GoldBuildStatus.COMPLETE and record.pruned_at_utc is None:
-        if record.completed_at_utc is None or record.row_count is None or not record.artifact_paths_complete:
-            raise ValueError("unpruned complete Gold build requires completion metadata and all artifact paths")
+        if (
+            record.completed_at_utc is None
+            or record.row_count is None
+            or not record.artifact_paths_complete
+        ):
+            raise ValueError(
+                "unpruned complete Gold build requires completion metadata and all artifact paths"
+            )
 
 
 def _frame(records: list[GoldCatalogRecord]) -> pl.DataFrame:
@@ -95,6 +107,14 @@ def _record(row: dict[str, object]) -> GoldCatalogRecord:
             raise TypeError(f"catalog {name} must be datetime")
         return value
 
+    def _int(name: str) -> int:
+        value = row[name]
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"catalog {name} must be int")
+        return value
+
+    row_count_value = row["row_count"]
+    row_count = None if row_count_value is None else _int("row_count")
     return GoldCatalogRecord(
         dataset_id=str(row["dataset_id"]),
         build_id=str(row["build_id"]),
@@ -102,11 +122,11 @@ def _record(row: dict[str, object]) -> GoldCatalogRecord:
         current=bool(row["current"]),
         started_at_utc=_dt("started_at_utc") or _raise_missing_started(),
         completed_at_utc=_dt("completed_at_utc"),
-        schema_version=int(row["schema_version"]),
-        feature_version=int(row["feature_version"]),
+        schema_version=_int("schema_version"),
+        feature_version=_int("feature_version"),
         min_timestamp=_dt("min_timestamp"),
         max_timestamp=_dt("max_timestamp"),
-        row_count=None if row["row_count"] is None else int(row["row_count"]),
+        row_count=row_count,
         data_path=None if row["data_path"] is None else str(row["data_path"]),
         build_manifest_path=None
         if row["build_manifest_path"] is None
