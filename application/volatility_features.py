@@ -118,7 +118,10 @@ def build_volatility_features(
     if missing:
         raise KeyError(f"missing Silver volatility series: {', '.join(missing)}")
     joined = _outer_join(
-        [_series_features(series_id, silver_by_series[series_id], policy) for series_id in VOLATILITY_SERIES]
+        [
+            _series_features(series_id, silver_by_series[series_id], policy)
+            for series_id in VOLATILITY_SERIES
+        ]
     )
     joined = joined.with_columns(
         _safe_ratio("vix9d_level", "vix_level", "vix9d_vix_ratio"),
