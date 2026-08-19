@@ -139,7 +139,10 @@ def test_partial_sweep_failure_leaves_unselectable_tombstone_and_retry_cleans_or
     assert not paths.gold_data(oldest.build_id).exists()
     assert paths.gold_build_manifest(oldest.build_id).exists()
     assert paths.gold_build_profile(oldest.build_id).exists()
-    assert LATEST_COMPATIBLE.resolve(catalog.read(), GoldCompatibility(1, 1)).build_id == current.build_id
+    assert (
+        LATEST_COMPATIBLE.resolve(catalog.read(), GoldCompatibility(1, 1)).build_id
+        == current.build_id
+    )
 
     retry = GoldRetentionService(
         catalog,
