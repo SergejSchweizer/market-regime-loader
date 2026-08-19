@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import polars as pl
@@ -55,7 +56,7 @@ class SilverSeriesRepository:
             key=_SILVER_KEY,
             destination_for_month=lambda year, month: self._paths.silver_month(
                 contract.series_id,
-                __import__("datetime").date(year, month, 1),
+                date(year, month, 1),
             ),
         )
         return diff
