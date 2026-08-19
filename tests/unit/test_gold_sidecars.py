@@ -59,15 +59,18 @@ def test_manifest_has_exact_deterministic_json_contract_without_publication_stat
         json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True) + "\n"
     ).encode()
     assert manifest.to_json_bytes() == expected
-    assert builder.build(
-        frame,
-        build_id="20260819T020000Z",
-        started_at_utc=START,
-        completed_at_utc=START + timedelta(minutes=2),
-        data_path="versions/build_id=20260819T020000Z/data.parquet",
-        data_sha256="b" * 64,
-        plot_path="versions/build_id=20260819T020000Z/feature_profile.png",
-    ).to_json_bytes() == expected
+    assert (
+        builder.build(
+            frame,
+            build_id="20260819T020000Z",
+            started_at_utc=START,
+            completed_at_utc=START + timedelta(minutes=2),
+            data_path="versions/build_id=20260819T020000Z/data.parquet",
+            data_sha256="b" * 64,
+            plot_path="versions/build_id=20260819T020000Z/feature_profile.png",
+        ).to_json_bytes()
+        == expected
+    )
 
 
 def test_feature_set_hash_covers_order_dtype_versions_and_formula_parameters() -> None:
