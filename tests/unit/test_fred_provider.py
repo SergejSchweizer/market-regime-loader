@@ -61,7 +61,7 @@ def test_four_registered_series_send_exact_delta_and_scalar_schema() -> None:
         assert context.source_id == source_id
         assert frame.get_column("observation_date").to_list() == [START, END]
         assert frame.columns[-1] == "value"
-        assert API_KEY not in frame.get_column("source_url").item()
+        assert API_KEY not in frame.get_column("source_url").unique().item()
         assert API_KEY not in repr(provider)
 
 
@@ -131,12 +131,11 @@ def test_secret_redaction_http_error_contract_validation_and_clock() -> None:
     with pytest.raises(ProviderHttpError) as captured:
         failing.fetch(series_contract("us_10y"), update_request())
     assert API_KEY not in str(captured.value)
+    empty_response = FakeTransport(HttpResponse(200, fred_payload([]), {}))
     with pytest.raises(ValueError, match="unsupported FRED"):
-        make_provider(FakeTransport(HttpResponse(200, fred_payload([],), {}))).fetch(
-            series_contract("vix"), update_request()
-        )
+        make_provider(empty_response).fetch(series_contract("vix"), update_request())
     with pytest.raises(ValueError, match="exact bounded"):
-        make_provider(FakeTransport(HttpResponse(200, fred_payload([],), {}))).fetch(
+        make_provider(empty_response).fetch(
             series_contract("us_10y"), ProviderRequest("update", START, END, True)
         )
     with pytest.raises(ValueError, match="api_key"):
