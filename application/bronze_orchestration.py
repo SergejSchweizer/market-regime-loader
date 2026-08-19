@@ -88,9 +88,12 @@ class BronzeOrchestrator:
         )
         if operation is OperationMode.BOOTSTRAP and plan.mode is not OperationMode.BOOTSTRAP:
             raise ValueError("explicit bootstrap did not resolve to bootstrap plan")
-        if operation is OperationMode.UPDATE and bounds.maximum is not None:
-            if plan.mode is not OperationMode.UPDATE or plan.maximum_history:
-                raise AssertionError("normal existing-history call must remain a bounded update")
+        if (
+            operation is OperationMode.UPDATE
+            and bounds.maximum is not None
+            and (plan.mode is not OperationMode.UPDATE or plan.maximum_history)
+        ):
+            raise AssertionError("normal existing-history call must remain a bounded update")
 
         run_id = self._run_id_factory(series_id)
         started = self._utc_now()
