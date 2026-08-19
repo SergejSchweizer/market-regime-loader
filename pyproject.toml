@@ -17,6 +17,9 @@ dependencies = [
   "matplotlib>=3.10",
 ]
 
+[project.scripts]
+market-regime-loader = "api.cli:main"
+
 [project.optional-dependencies]
 dev = [
   "pytest>=8.4",
