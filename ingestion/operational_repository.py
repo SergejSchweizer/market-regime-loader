@@ -12,34 +12,34 @@ from ingestion.parquet_repository import atomic_write_parquet
 
 INVENTORY_SCHEMA = pl.Schema(
     {
-        "series_id": pl.String,
-        "provider": pl.String,
-        "min_observation_date": pl.Date,
-        "max_observation_date": pl.Date,
-        "row_count": pl.Int64,
-        "duplicate_key_count": pl.Int64,
-        "file_count": pl.Int64,
+        "series_id": pl.String(),
+        "provider": pl.String(),
+        "min_observation_date": pl.Date(),
+        "max_observation_date": pl.Date(),
+        "row_count": pl.Int64(),
+        "duplicate_key_count": pl.Int64(),
+        "file_count": pl.Int64(),
     }
 )
 
 RUN_SCHEMA = pl.Schema(
     {
-        "run_id": pl.String,
-        "provider": pl.String,
-        "series_id": pl.String,
-        "mode": pl.String,
-        "requested_start": pl.Date,
-        "requested_end": pl.Date,
-        "fetched_rows": pl.Int64,
-        "accepted_rows": pl.Int64,
-        "inserted_rows": pl.Int64,
-        "revised_rows": pl.Int64,
-        "written_partitions": pl.Int64,
-        "status": pl.String,
+        "run_id": pl.String(),
+        "provider": pl.String(),
+        "series_id": pl.String(),
+        "mode": pl.String(),
+        "requested_start": pl.Date(),
+        "requested_end": pl.Date(),
+        "fetched_rows": pl.Int64(),
+        "accepted_rows": pl.Int64(),
+        "inserted_rows": pl.Int64(),
+        "revised_rows": pl.Int64(),
+        "written_partitions": pl.Int64(),
+        "status": pl.String(),
         "started_at_utc": pl.Datetime("us", "UTC"),
         "completed_at_utc": pl.Datetime("us", "UTC"),
-        "error_category": pl.String,
-        "error_message": pl.String,
+        "error_category": pl.String(),
+        "error_message": pl.String(),
     }
 )
 
