@@ -139,13 +139,16 @@ class YahooMoveProvider:
                     **numeric,
                 }
             )
-        frame = pl.DataFrame(rows, schema={
-            "observation_date": pl.Date,
-            "open": pl.Float64,
-            "high": pl.Float64,
-            "low": pl.Float64,
-            "close": pl.Float64,
-        })
+        frame = pl.DataFrame(
+            rows,
+            schema={
+                "observation_date": pl.Date,
+                "open": pl.Float64,
+                "high": pl.Float64,
+                "low": pl.Float64,
+                "close": pl.Float64,
+            },
+        )
         if bool(frame.select(pl.col("observation_date").is_duplicated().any()).item()):
             raise ValueError("Yahoo payload contains duplicate observation dates")
         fetched_at = self._clock()
