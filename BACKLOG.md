@@ -2,7 +2,7 @@
 
 This backlog is the implementation source of truth for `market-regime-loader`.
 
-The repository loads reusable daily market-state inputs from open/public sources, preserves/reconciles source history, and publishes deterministic immutable Gold feature snapshots through a Bronze -> Silver -> Gold architecture.
+The repository loads reusable daily market-state inputs from open/public sources, preserves source history, performs strict incremental updates during normal execution, and publishes deterministic immutable Gold feature snapshots through a Bronze -> Silver -> Gold architecture.
 
 Last reviewed: 2026-08-19
 
@@ -104,7 +104,7 @@ Use patterns only where they reduce coupling; prefer composition/`typing.Protoco
 
 - **Ports and Adapters / Hexagonal Architecture** — `application` owns contracts/use cases; `ingestion` implements provider/filesystem adapters.
 - **Adapter** — CBOE/STOXX/Yahoo/ECB/FRED and physical persistence implementations.
-- **Strategy** — retry policy, incremental/reconcile planning policy, consumer resolution policy.
+- **Strategy** — retry policy, update/reconcile planning policy, consumer resolution policy.
 - **Registry/Factory** — canonical series/provider adapter routing; orchestration must not use provider `if/elif` ladders.
 - **Repository** — Bronze, Silver, state, run manifest, inventory, Gold build and Gold catalog persistence.
 - **Unit of Work** — one-series Bronze durability boundary and Gold catalog promotion boundary.
@@ -238,62 +238,101 @@ pruned_at_utc
 
 Root JSON/PNG are materialized views, not authority.
 
-## Revision And Reconciliation Contract
+## Strict Delta Update Contract
 
-Planner modes:
+The ingestion modes are explicit:
 
 ```text
 bootstrap
-incremental
+update
 reconcile
 ```
 
-- `bootstrap`: maximum public history for empty Bronze.
-- `incremental`: `latest_stored_date - overlap_days` through injected current date; default overlap 7 calendar days.
-- `reconcile`: periodic maximum-history request; default every 7 days, to detect revisions older than the overlap window.
-- `full_file` providers naturally fetch full history; `date_range` providers omit/re-expand bounds during reconcile to request maximum exposed history.
-- A shorter/omitted source response never implies deletion of retained history.
-- Equal-key observations may be revised.
-- Explicit deletion semantics require a future explicit source-mutation contract; they are not inferred from omission.
+### Bootstrap
+
+If authoritative Bronze contains no observation for the selected series, request maximum public history exposed by the configured provider.
+
+### Normal `update` / `run-daily`
+
+If Bronze exists, determine the delta window from **the newest durable Bronze observation**, never from the oldest retained observation:
+
+```text
+latest_stored_date = max(Bronze.observation_date)
+request_start      = latest_stored_date - overlap_days
+request_end        = injected_today
+```
+
+Default `overlap_days = 7` calendar days. The overlap exists only to catch recent equal-key revisions.
+
+Mandatory invariants:
+
+1. `latest_stored_date` is derived from authoritative Bronze (state may cache it but must not override Bronze truth).
+2. Normal `update` and `run-daily` never choose `min(Bronze.observation_date)` as request start.
+3. Normal `update` and `run-daily` never automatically switch to full-history `reconcile`.
+4. If `request_end < latest_stored_date`, fail rather than fabricate a reverse/empty history state.
+5. For `date_range` providers, send the exact bounded interval `[request_start, request_end]`; do not silently broaden it.
+6. For `full_file` providers, a complete remote object may have to be downloaded because the upstream source has no bounded-history capability, but before logical diff/persistence filter accepted observations to `[request_start, request_end]` during normal update.
+7. A normal update must rewrite only monthly partitions containing inserted/revised rows inside the logical delta window.
+8. Provider rows outside the requested delta scope must not expand normal update semantics: bounded-provider out-of-window data is a contract error; full-file out-of-window data is ignored for the normal diff.
+9. Source omission/shortening never deletes older retained history.
+
+Canonical proof case required in planner/orchestration/provider integration tests:
+
+```text
+Bronze min date       = 2000-01-03
+Bronze latest date    = 2026-08-18
+injected today        = 2026-08-19
+overlap_days          = 7
+expected request      = 2026-08-11 .. 2026-08-19
+forbidden request     = 2000-01-03 .. 2026-08-19
+```
+
+### Explicit `reconcile`
+
+`reconcile` is a separate operator-requested command. It may request maximum currently exposed history to detect revisions older than the overlap window. It is **never invoked automatically by `run-daily`**. Operators may schedule it separately if desired.
+
+A shorter/omitted response still never implies deletion. Explicit deletion semantics require a future source-mutation contract.
 
 ## PR Graph
+
+Each PR's `Depends on:` field is authoritative; this diagram is informational only.
 
 ```text
 PR-01 foundation + quality/Git policy
   |\
-  | +--> PR-03 Parquet repositories -----------+
-  | +--> PR-04 HTTP/provider ports ------------+
-  +----> PR-02 registry/path contracts --------+
-                         |                       |
-                         +--> PR-05 planner/state+
-                                   |
-                       +-----------+-----------+-----------+-----------+
-                       |           |           |           |           |
-                     PR-06       PR-07       PR-08       PR-09       PR-10
-                     CBOE        STOXX       Yahoo       ECB         FRED
-                       \           |           |           |           /
-                        +----------+-----------+-----------+----------+
-                                           |
-                              PR-11 manifests/inventory
-                                           |
-                              PR-12 Bronze orchestration
-                                  /                 \
-                           PR-13 Silver          PR-14 inventory CLI
-                              /      \
-                         PR-15      PR-16
-                         vol Gold   macro Gold
-                              \      /
-                               PR-17 canonical Gold
-                                /                 \
-                         PR-18 build store     PR-19 catalog/resolution
+  | +--> PR-03 Parquet repositories
+  +----> PR-02 registry/path contracts
+             |\
+             | +--> PR-04 HTTP/provider ports
+             +----> PR-05 planner/state
+  PR-02 + PR-03 --> PR-11 manifests/inventory
+
+PR-02 + PR-04 + PR-05
+       |      |      |      |      |
+     PR-06  PR-07  PR-08  PR-09  PR-10
+       \      |      |      |      /
+        +-----+------+------+-+----+
+                         + PR-03 + PR-11
+                                  |
+                                PR-12
+                               /     \
+                            PR-13   PR-14
+                           /    \
+                        PR-15  PR-16
+                           \    /
+                            PR-17
+                           /     \
+                        PR-18   PR-19
+                          |
+                        PR-20
+                           \     /
+                            PR-21
                               |
-                         PR-20 build sidecars
-                              \                 /
-                               PR-21 publication
-                                      |
-                               PR-22 retention
-                                      |
-                         PR-14 -------+------- PR-23 daily pipeline
+                            PR-22
+                              |
+                    PR-14 + PR-21 + PR-22
+                              |
+                            PR-23
 ```
 
 ---
@@ -389,14 +428,14 @@ Depends on: PR-01
 Commit: `feat(pr-03): add polars parquet repositories`
 
 Description:
-- R1: Define narrow repository/IO ports and Polars filesystem adapters for deterministic zero/one/multi monthly reads with caller-key ordering.
+- R1: Define narrow repository/IO ports and Polars filesystem adapters for deterministic zero/one/multi monthly reads with caller-key ordering and efficient `min/max observation_date` discovery from authoritative Bronze.
 - R2: Implement same-directory temp write, flush/fsync where supported, and `os.replace`; stale temp never becomes authoritative.
 - R3: Implement pure diff by supplied natural key returning inserts/unchanged/revisions; reject duplicate incoming keys; equal-key new row replaces once.
 - R4: Rewrite only months containing inserts/revisions; logical no-op preserves file hashes/mtime and unrelated months.
-- R5: Add tests for read modes, atomic interruption, stale temp, duplicate keys, revision, no-op, deterministic ordering, and unaffected partitions.
+- R5: Add tests for read modes, authoritative min/max discovery, atomic interruption, stale temp, duplicate keys, revision, no-op, deterministic ordering, and unaffected partitions.
 
 Acceptance:
-- A1 (verifies R1): repository test doubles and filesystem adapters satisfy the same contracts and production code contains no pandas.
+- A1 (verifies R1): repository test doubles and filesystem adapters satisfy the same contracts, min/max are exact from fixtures, and production code contains no pandas.
 - A2 (verifies R2): injected failures preserve prior destination; no stale temp is authoritative.
 - A3 (verifies R3): classifications and duplicate rejection are exact/idempotent.
 - A4 (verifies R4): no-op and unrelated partitions remain byte/mtime unchanged.
@@ -422,19 +461,19 @@ Commit: `feat(pr-04): add shared http provider port`
 
 Description:
 - R1: Define application-facing HTTP request/response port and `MarketDataProvider` protocol; application imports no `httpx`.
-- R2: Implement one `httpx` adapter with explicit timeouts and injected `RetryPolicy` Strategy: bounded retries for transient transport errors, `429`, `5xx`; no generic retry for other `4xx`.
-- R3: Implement bounded exponential backoff with injected sleeper, deterministic tests, and numeric `Retry-After` capped by configured maximum.
-- R4: Define typed sanitized provider error with provider/series/source/request category but no API key/auth/full-secret URL.
-- R5: Add tests for success, timeout, retry/non-retry statuses, exhaustion, Retry-After, sleep sequence, protocol substitution, and secret redaction.
+- R2: Provider request contract receives an explicit operation mode and logical date window; `date_range` adapters must honor exact bounds for normal update while `full_file` adapters receive the same logical window for post-fetch filtering.
+- R3: Implement one `httpx` adapter with explicit timeouts and injected `RetryPolicy` Strategy: bounded retries for transient transport errors, `429`, `5xx`; no generic retry for other `4xx`.
+- R4: Implement bounded exponential backoff with injected sleeper, deterministic tests, and numeric `Retry-After` capped by configured maximum.
+- R5: Define typed sanitized provider error with provider/series/source/request category but no API key/auth/full-secret URL; add success/retry/bound-contract/protocol/redaction tests.
 
 Acceptance:
 - A1 (verifies R1): fake provider/HTTP implementations substitute without `httpx` in application.
-- A2 (verifies R2): exact retry categories/attempts/timeouts are proven.
-- A3 (verifies R3): deterministic delay/cap sequence passes without real sleep.
-- A4 (verifies R4): safe context remains and configured secrets never appear.
-- A5 (verifies R5): all stated cases pass offline.
+- A2 (verifies R2): mocks prove normal update propagates exact logical bounds to every provider adapter contract.
+- A3 (verifies R3): exact retry categories/attempts/timeouts are proven.
+- A4 (verifies R4): deterministic delay/cap sequence passes without real sleep.
+- A5 (verifies R5): safe context remains, configured secrets never appear, and all stated cases pass offline.
 
-## PR-05: Implement Bootstrap, Incremental, Reconcile Planner And State
+## PR-05: Implement Bootstrap, Strict Delta Update, Explicit Reconcile Planner And State
 
 Status: Planned
 
@@ -442,7 +481,7 @@ Updated: 2026-08-19
 
 PR: none
 
-Git branch: `pr-05/planner-reconciliation-state`
+Git branch: `pr-05/planner-delta-reconcile-state`
 
 Git status: `not-started (branch absent)`
 
@@ -450,23 +489,23 @@ Agent lane: Foundation; first free agent
 
 Depends on: PR-02, PR-03
 
-Commit: `feat(pr-05): add ingestion planner and reconciliation`
+Commit: `feat(pr-05): add strict delta ingestion planner`
 
 Description:
-- R1: Implement pure planner modes `bootstrap|incremental|reconcile` from registry contract, durable latest date/state, injected clock, overlap and reconcile interval.
-- R2: Incremental computes `latest-overlap` to injected today (default overlap 7 calendar days); validate invalid ranges/config.
-- R3: Reconcile is selected when no successful reconciliation exists or configured interval (default 7 days) elapsed; it requests maximum currently exposed history; `full_file` remains full-file in all modes.
-- R4: Define `ingestion_state.parquet` key `(provider,series_id)` with last success, last observation, last requested bounds, mode, fetched/changed counts, and `last_reconcile_utc`.
-- R5: State advances only after caller confirms durable Bronze plus success run manifest; no-op may advance success/reconcile timestamps but not fabricate observation coverage.
-- R6: All dates/times are injected; no hidden wall clock.
+- R1: Implement pure planner modes `bootstrap|update|reconcile`; `bootstrap` only when no authoritative Bronze observation exists, `update` for normal existing-history execution, and `reconcile` only when explicitly requested by caller/operator.
+- R2: For `update`, derive `latest_stored_date=max(authoritative Bronze observation_date)` and compute `request_start=latest_stored_date-overlap_days`, `request_end=injected_today`; default overlap 7; never use Bronze minimum date as update start; reject today earlier than latest stored date and invalid overlap/config.
+- R3: Map `update` to exact bounded request for `date_range`; map `update` to `full_file` fetch plus mandatory logical filter window metadata for `full_file`; map explicit `reconcile` to maximum exposed history request. No clock/state condition may auto-promote `update` into `reconcile`.
+- R4: Define `ingestion_state.parquet` key `(provider,series_id)` with last success, authoritative last observation cache, last requested start/end, operation mode, fetched/accepted/changed counts, and optional `last_reconcile_utc`; state cache disagreement with authoritative Bronze must fail or be repaired from Bronze, never broaden fetch scope.
+- R5: State advances only after caller confirms durable Bronze plus success run manifest; no-op may advance success timestamp but not fabricate observation coverage; reconcile timestamp advances only after explicit successful reconcile.
+- R6: All dates/times are injected; add canonical proof fixture `min=2000-01-03,max=2026-08-18,today=2026-08-19,overlap=7 -> 2026-08-11..2026-08-19`, plus an assertion that `2000-01-03..2026-08-19` is never emitted by normal update.
 
 Acceptance:
-- A1 (verifies R1): fixed state/clock fixtures select exact three modes.
-- A2 (verifies R2): overlap/range validation is exact.
-- A3 (verifies R3): interval boundary and max-history reconcile instructions pass for both capability classes.
-- A4 (verifies R4): typed state round-trip/upsert leaves one row/key.
-- A5 (verifies R5): failure preserves prior state; no-op semantics are exact.
-- A6 (verifies R6): deterministic clock tests/static checks find no production wall-clock call.
+- A1 (verifies R1): empty Bronze -> bootstrap; existing Bronze -> update; reconcile appears only from explicit reconcile request.
+- A2 (verifies R2): exact latest-derived overlap bounds pass; minimum-date start, reverse date, and invalid configuration fail deterministically.
+- A3 (verifies R3): `date_range` receives exact delta bounds; `full_file` receives exact logical filter window; normal update never emits maximum-history/reconcile instruction.
+- A4 (verifies R4): typed state round-trip/upsert leaves one row/key and stale cache cannot override Bronze max date.
+- A5 (verifies R5): failure preserves prior state; no-op/reconcile timestamp semantics are exact.
+- A6 (verifies R6): canonical fixture emits only `2026-08-11..2026-08-19`; test spy proves no production planner wall-clock call and no normal full-history plan.
 
 ## PR-06: Add CBOE Volatility Provider
 
@@ -490,14 +529,14 @@ Description:
 - R1: Implement one CBOE adapter for registered `vix|vix9d|vix3m|vix6m|vix1y` only through shared provider/HTTP contracts.
 - R2: Treat sources as registry-driven `full_file`; unavailable registered source returns typed error, never fallback/synthetic data.
 - R3: Parse exact Bronze common+OHLC with Polars; reject invalid/duplicate dates, missing/non-finite close, invalid natural key.
-- R4: Shorter response never deletes retained rows; equal-key revisions replace once through shared diff.
-- R5: Add representative fixtures/tests for all routes, parsing, invalid/duplicate, revision, shortened response, unavailable source, HTTP propagation.
+- R4: On normal update, although full file may be downloaded, filter parsed rows to caller's exact logical delta window before returning/diffing; out-of-window rows must not be persisted or cause old-month rewrites. On bootstrap/explicit reconcile, maximum history may be accepted. Shorter response never deletes retained rows.
+- R5: Add representative fixtures/tests for all routes, exact delta-window filtering, parsing, invalid/duplicate, revision, shortened response, unavailable source, HTTP propagation.
 
 Acceptance:
 - A1 (verifies R1): only five registered canonical IDs resolve to CBOE.
 - A2 (verifies R2): requests use registry source/full-file and no fallback path.
 - A3 (verifies R3): exact schema and invalid cases pass.
-- A4 (verifies R4): retained history survives shortening and revision touches matching key only.
+- A4 (verifies R4): normal update accepts only in-window rows and touches only matching affected months; bootstrap/reconcile may accept full range; retained history survives shortening.
 - A5 (verifies R5): all scenarios pass offline.
 
 ## PR-07: Add STOXX VSTOXX Provider
@@ -521,15 +560,15 @@ Commit: `feat(pr-07): ingest vstoxx history`
 Description:
 - R1: Implement only registered `vstoxx/V2TX` through shared ports.
 - R2: Parse registry-declared scalar Bronze `value: Float64`; no runtime provider-shape guessing.
-- R3: Use `full_file`, preserve older history on shorter response, permit equal-key revisions.
-- R4: Reject invalid/duplicate dates and missing/non-finite values; propagate safe HTTP/provider errors.
-- R5: Add representative fixture/tests for bootstrap/reconcile, stable source identity, invalid/duplicate, revision, shortening, error propagation.
+- R3: `full_file` source may download complete history, but normal update filters to exact caller delta window before logical diff/persistence; bootstrap/explicit reconcile may accept maximum history; shorter response never deletes older retained data.
+- R4: Reject invalid/duplicate dates and missing/non-finite values; propagate safe HTTP/provider errors; revisions replace equal keys once.
+- R5: Add representative fixture/tests for bootstrap, explicit reconcile, strict normal delta filtering, stable source identity, invalid/duplicate, revision, shortening, error propagation.
 
 Acceptance:
 - A1 (verifies R1): only registered VSTOXX mapping is accepted.
 - A2 (verifies R2): exact scalar Bronze schema is produced.
-- A3 (verifies R3): shortening/revision behavior is correct.
-- A4 (verifies R4): invalid/error cases are deterministic/sanitized.
+- A3 (verifies R3): normal update accepts only caller-window rows while reconcile/bootstrap can use full history and shortening never truncates retained history.
+- A4 (verifies R4): invalid/error/revision cases are deterministic/sanitized.
 - A5 (verifies R5): all scenarios pass offline.
 
 ## PR-08: Add Yahoo MOVE Provider
@@ -552,17 +591,17 @@ Commit: `feat(pr-08): ingest move index history`
 
 Description:
 - R1: Implement isolated Yahoo adapter only for registered `move -> ^MOVE`; no Yahoo-specific behavior outside adapter.
-- R2: Bootstrap/reconcile request maximum available history; incremental passes exact planner range.
-- R3: Normalize only daily OHLC to exact Bronze; reject invalid/duplicate dates and missing/non-finite close; exclude volume/actions.
-- R4: Empty bounded response is valid no-op; shorter reconcile response never truncates retained history; revisions replace once.
-- R5: Add tests for max/bounded request, empty, invalid/duplicate, revision, shortening, schema, and HTTP errors.
+- R2: Bootstrap/explicit reconcile request maximum available history; normal update passes the planner's exact `request_start/request_end` and must not broaden it.
+- R3: Normalize only daily OHLC to exact Bronze; reject invalid/duplicate dates and missing/non-finite close; exclude volume/actions; bounded normal response outside requested dates is a contract failure.
+- R4: Empty bounded response is valid no-op; shorter explicit reconcile response never truncates retained history; revisions replace once.
+- R5: Add canonical delta request test (`2026-08-11..2026-08-19`), maximum-history separation, empty, out-of-window, invalid/duplicate, revision, shortening, schema, and HTTP errors.
 
 Acceptance:
 - A1 (verifies R1): only canonical MOVE mapping is accepted and application remains provider-agnostic.
-- A2 (verifies R2): exact mode request arguments pass.
-- A3 (verifies R3): schema/exclusion/invalid cases pass.
+- A2 (verifies R2): normal update makes exactly one bounded request with exact dates and never maximum-history fallback.
+- A3 (verifies R3): schema/exclusion/invalid/out-of-window cases pass.
 - A4 (verifies R4): no-op/shortening/revision semantics are exact.
-- A5 (verifies R5): all scenarios pass offline.
+- A5 (verifies R5): canonical delta fixture proves no request from historical minimum; all scenarios pass offline.
 
 ## PR-09: Add ECB CISS And ESTR Provider
 
@@ -583,18 +622,18 @@ Depends on: PR-02, PR-04, PR-05
 Commit: `feat(pr-09): ingest ecb regime series`
 
 Description:
-- R1: Implement only registered CISS and ESTR SDMX/data API mappings through shared ports.
-- R2: Bootstrap/reconcile maximum exposed history; incremental uses exact planner `startPeriod/endPeriod`; MVP does not use `updatedAfter` deletion events until explicit deletion semantics exist.
-- R3: Parse exact scalar Bronze; missing/non-numeric/non-finite observations are absent, duplicates invalid; calendar gaps remain gaps.
-- R4: Treat ECB no-results response for a valid bounded query as empty/no-op where provider semantics indicate no matching observations; other typed HTTP errors propagate; revisions replace once.
-- R5: Add fixtures/tests for both series, max/bounded requests, missing/duplicate/gap, empty/no-result mapping, revision, shortening and HTTP errors.
+- R1: Implement only registered CISS and ESTR API mappings through shared ports.
+- R2: Bootstrap/explicit reconcile request maximum exposed history; normal update maps exact planner bounds to provider `startPeriod/endPeriod` and never omits/broadens them; MVP does not use deletion events until explicit deletion semantics exist.
+- R3: Parse exact scalar Bronze; missing/non-numeric/non-finite observations are absent, duplicates invalid; calendar gaps remain gaps; out-of-window bounded rows fail contract.
+- R4: Treat provider no-results response for a valid bounded query as empty/no-op where source semantics indicate no matching observations; other typed HTTP errors propagate; revisions replace once.
+- R5: Add canonical delta request test, both series, max-history explicit modes, missing/duplicate/gap/out-of-window, empty/no-result mapping, revision, shortening and HTTP errors.
 
 Acceptance:
 - A1 (verifies R1): exactly two mappings resolve.
-- A2 (verifies R2): mode arguments are exact and no deletion-event handling is implied.
-- A3 (verifies R3): schema/missing/duplicate/gap behavior passes.
+- A2 (verifies R2): normal mode emits exact start/end and no maximum-history request; only bootstrap/reconcile do so.
+- A3 (verifies R3): schema/missing/duplicate/gap/out-of-window behavior passes.
 - A4 (verifies R4): valid no-result becomes no-op while real failures remain typed; revision is exact.
-- A5 (verifies R5): all scenarios pass offline.
+- A5 (verifies R5): canonical delta fixture proves no historical-minimum fetch and all scenarios pass offline.
 
 ## PR-10: Add FRED Rates, Credit, And Dollar Provider
 
@@ -616,19 +655,19 @@ Commit: `feat(pr-10): ingest fred regime series`
 
 Description:
 - R1: Implement exactly registered `DGS2|DGS10|DTWEXBGS|BAMLHE00EHYIOAS` mappings through shared ports.
-- R2: Bootstrap/reconcile maximum currently exposed history; incremental uses exact planner observation bounds.
-- R3: Parse exact scalar Bronze; `.`, blank, missing/non-finite values are absent; duplicate dates invalid.
-- R4: Shorter responses never truncate retained history; reconcile may revise any equal-key historical observation.
+- R2: Bootstrap/explicit reconcile request maximum currently exposed history; normal update sends exact planner observation bounds and never omits/broadens them or silently falls back to full history.
+- R3: Parse exact scalar Bronze; `.`, blank, missing/non-finite values are absent; duplicate dates invalid; out-of-window bounded rows fail contract.
+- R4: Shorter reconcile/bootstrap responses never truncate retained history; explicit reconcile may revise historical equal keys, while normal update can revise only keys inside its delta window.
 - R5: Inject required FRED API key/config; strip/redact it from persisted `source_url`, registry, logs, errors, repr, and fixtures.
-- R6: Add tests for four series, modes, missing/duplicate, historical revision, shortened HY history, API-key redaction, errors.
+- R6: Add canonical delta request fixture, four series, explicit max-history modes, missing/duplicate/out-of-window, historical revision, shortened HY history, API-key redaction, errors.
 
 Acceptance:
 - A1 (verifies R1): exactly four source/canonical mappings resolve.
-- A2 (verifies R2): request modes/bounds are exact.
-- A3 (verifies R3): schema/missing/duplicate behavior passes.
-- A4 (verifies R4): full reconciliation updates historical equal keys without truncation.
+- A2 (verifies R2): normal mode sends exact delta bounds and never full-history; bootstrap/reconcile remain explicitly separate.
+- A3 (verifies R3): schema/missing/duplicate/out-of-window behavior passes.
+- A4 (verifies R4): normal revision stays inside delta window and explicit reconcile may update older equal keys without truncation.
 - A5 (verifies R5): configured secret is absent from every persisted/diagnostic artifact tested.
-- A6 (verifies R6): all scenarios pass offline.
+- A6 (verifies R6): canonical fixture proves no historical-minimum fetch and all scenarios pass offline.
 
 ## PR-11: Add Operational Manifest And Inventory Repositories
 
@@ -650,16 +689,16 @@ Commit: `feat(pr-11): add inventory and run manifests`
 
 Description:
 - R1: Define authoritative `dataset_inventory.parquet` snapshot fields `series_id,provider,min_observation_date,max_observation_date,row_count,duplicate_key_count,file_count`.
-- R2: Define `ingestion_runs.parquet` unique `run_id` fields including provider/series/mode/requested bounds/fetched/inserted/revised/written partitions/status/timestamps/sanitized error.
+- R2: Define `ingestion_runs.parquet` unique `run_id` fields including provider/series/mode/requested bounds/fetched rows/accepted rows/inserted/revised/written partitions/status/timestamps/sanitized error.
 - R3: Implement repository adapters: deterministic snapshot replacement for inventory and unique-run upsert for runs.
-- R4: Inventory describes observed stored coverage only; no synthetic market-calendar missing metrics.
-- R5: Failed run never contains secrets or claims non-durable inserts/revisions/partitions; add empty/populated/success/failure/idempotency tests.
+- R4: Inventory describes observed stored coverage only; no synthetic market-calendar missing metrics. `max_observation_date` is the authoritative planning reference for normal delta updates; `min_observation_date` must not be used as normal update request start.
+- R5: Failed run never contains secrets or claims non-durable inserts/revisions/partitions; add empty/populated/success/failure/idempotency/request-bound tests.
 
 Acceptance:
 - A1 (verifies R1): exact inventory schema/values pass.
-- A2 (verifies R2): exact run schema/status values pass.
+- A2 (verifies R2): exact run schema/status/request-bound values pass.
 - A3 (verifies R3): deterministic round-trip and no duplicate run ID.
-- A4 (verifies R4): no expected-calendar metric exists.
+- A4 (verifies R4): no expected-calendar metric exists and tests distinguish min from max planning semantics.
 - A5 (verifies R5): failure durability/redaction and all stated cases pass.
 
 ## PR-12: Add Registry-Driven Bronze Orchestration Unit Of Work
@@ -682,19 +721,19 @@ Commit: `feat(pr-12): orchestrate bronze updates`
 
 Description:
 - R1: Application service resolves series contract and provider via injected registries, planner, repositories; no provider implementation/HTTP imports or provider conditional ladder.
-- R2: Execute `bootstrap|incremental|reconcile` with injected clock; bootstrap on populated selected series fails before fetch.
-- R3: One selected series is a Unit of Work: fetch/parse -> diff -> durable Bronze -> durable success run -> state advance; failure before commit preserves prior state/authoritative data.
+- R2: Expose `bootstrap|update|reconcile`; normal `update` reads authoritative Bronze max date and uses PR-05 strict delta plan. `reconcile` occurs only through explicit caller request; orchestration must not select it based on age/timer/state during normal update.
+- R3: One selected series is a Unit of Work: fetch/parse -> enforce logical request window -> diff -> durable Bronze -> durable success run -> state advance; failure before commit preserves prior state/authoritative data.
 - R4: Multi-series isolation: one failed series does not roll back separately committed series; failed run is recorded safely.
-- R5: No-op writes success run with zero changes, rewrites no Bronze file, may advance success/reconcile time but not observation coverage.
-- R6: Add fake-provider/repository tests for registry routing, all modes, partial failure, barrier failures, restart, no-op, revision, reconcile, multi-series isolation.
+- R5: No-op writes success run with zero changes, rewrites no Bronze file, may advance success time but not observation coverage; normal update writes requested bounds exactly to run/state metadata.
+- R6: Add fake-provider/repository tests for registry routing, all modes, canonical delta fixture, assertion that normal update never calls reconcile/max-history strategy, partial failure, barrier failures, restart, no-op, revision, explicit reconcile, multi-series isolation.
 
 Acceptance:
 - A1 (verifies R1): provider registry substitution works with no application provider-specific imports/conditionals.
-- A2 (verifies R2): fixed clock/state selects exact modes and guard.
-- A3 (verifies R3): failure injection around each barrier proves commit semantics.
+- A2 (verifies R2): existing Bronze normal call always selects strict update; only explicit reconcile call selects reconcile.
+- A3 (verifies R3): canonical fixture accepts only `2026-08-11..2026-08-19`; failure injection around each barrier proves commit semantics.
 - A4 (verifies R4): one failure coexists with another durable success.
-- A5 (verifies R5): file hash/mtime/state/run values prove no-op semantics.
-- A6 (verifies R6): all stated scenarios pass offline.
+- A5 (verifies R5): file hash/mtime/state/run values prove no-op and exact-bound semantics.
+- A6 (verifies R6): spy proves no normal full-history request and all stated scenarios pass offline.
 
 ## PR-13: Build Canonical Silver Daily Series
 
@@ -1034,7 +1073,7 @@ Acceptance:
 - A5 (verifies R5): policy/resolution/repeated runs/view refresh are exact.
 - A6 (verifies R6): all cases pass offline.
 
-## PR-23: Add Daily Medallion Pipeline And Operational CLI
+## PR-23: Add Delta-Only Daily Medallion Pipeline And Operational CLI
 
 Status: Planned
 
@@ -1050,27 +1089,29 @@ Agent lane: Integration; one agent only
 
 Depends on: PR-14, PR-21, PR-22
 
-Commit: `feat(pr-23): add daily medallion pipeline`
+Commit: `feat(pr-23): add delta-only daily medallion pipeline`
 
 Description:
 - R1: Command adapters `bootstrap,update,reconcile,silver-build,gold-build,inventory,run-daily`; parsing/config/render in `api`, use cases in `application`; Gold publish only PR-21 service.
-- R2: On Gold-capable command entry: recover stale building rows and reconcile root materialized views before creating another build; recovery ambiguity stops publication.
-- R3: `run-daily`: planner chooses incremental/reconcile per selected/all 13 -> Bronze -> Silver -> full canonical Gold from current Silver -> immutable bundle -> physical candidate validation -> atomic catalog promotion -> root view refresh -> mark/sweep retention -> inventory refresh.
-- R4: `--series` restricts Bronze/Silver execution only; Gold always rebuilds full canonical schema from all currently available Silver; unknown series fail.
-- R5: Failure semantics: provider failure makes run non-zero but independent committed Bronze series remain; any pre-promotion Silver/Gold failure leaves old current; post-promotion materialized-view/retention failure returns non-zero but catalog truth is not falsely rolled back.
-- R6: Add structured stdlib logging context `run_id`, command, series/provider where applicable, build ID after creation, stage, status; sanitize secrets; stable exit codes for validation/provider/persistence/publication errors.
-- R7: End-to-end offline regression covers empty bootstrap, next-day incremental revision, scheduled full reconciliation of an older revision, shortened source, affected Silver months, Gold causality/schema, publication/materialized views, strict/fallback resolution, retention mark/sweep, no-op rerun, inventory.
-- R8: Document daily cron/systemd examples, persistent lake path, FRED secret injection, reconcile interval, auto-recovery semantics, logs/exit codes; no scheduled GitHub Actions ingestion.
+- R2: On Gold-capable command entry, recover stale building rows and reconcile root materialized views before creating another build; this Gold-view reconciliation is unrelated to market-source full-history `reconcile`.
+- R3: `run-daily` behavior is strict: empty selected series -> bootstrap; existing selected series -> **update only** using newest durable Bronze date and overlap through injected today. `run-daily` must never invoke source `reconcile`, maximum-history strategy, or historical-minimum request for an existing series. Then Bronze -> Silver -> full canonical Gold -> immutable bundle -> candidate validation -> atomic catalog promotion -> root view refresh -> retention -> inventory.
+- R4: `reconcile` is an explicit separate source command and may request maximum source history; if operators want it periodically, documentation gives a separate scheduler example. It is never hidden inside `run-daily`.
+- R5: `--series` restricts Bronze/Silver execution only; Gold always rebuilds full canonical schema from all currently available Silver; unknown series fail.
+- R6: Failure semantics: provider failure makes run non-zero but independent committed Bronze series remain; any pre-promotion Silver/Gold failure leaves old current; post-promotion materialized-view/retention failure returns non-zero but catalog truth is not falsely rolled back.
+- R7: Add structured stdlib logging context including `run_id`, command, series/provider where applicable, `request_start`, `request_end`, build ID after creation, stage, status; sanitize secrets; stable exit codes for validation/provider/persistence/publication errors.
+- R8: End-to-end offline regression covers empty bootstrap followed by normal next-day delta request, recent revision inside overlap, assertion that historical minimum is never requested by `run-daily`, full-file provider logical-window filtering, date-range exact bounds, explicit separate old-history reconcile, shortened source, affected Silver months, Gold causality/schema, publication/materialized views, strict/fallback resolution, retention, no-op rerun, inventory.
+- R9: Document daily cron/systemd examples for `run-daily` as delta-only, persistent lake path, FRED secret injection, overlap configuration, and a **separate optional explicit `reconcile` schedule**; no scheduled GitHub Actions ingestion.
 
 Acceptance:
 - A1 (verifies R1): all commands parse and layer boundaries/Gold publication path are exact.
-- A2 (verifies R2): stale/reconciliation cases repair or stop before new publication.
-- A3 (verifies R3): integration trace proves exact stage order including periodic reconcile and catalog-before-view semantics.
-- A4 (verifies R4): default 13/filter/unknown/full-Gold behavior exact.
-- A5 (verifies R5): failure injection proves exact pre/post commit durable truth.
-- A6 (verifies R6): log/exit fixtures contain required context and no secret.
-- A7 (verifies R7): full bootstrap/incremental/reconcile/revision/publication/resolution/retention/no-op scenario passes offline.
-- A8 (verifies R8): README documents runtime scheduling/config and no scheduled CI ingestion exists.
+- A2 (verifies R2): Gold materialized-view recovery repairs or stops safely and cannot trigger source full-history fetching.
+- A3 (verifies R3): canonical existing-history fixture `min=2000-01-03,max=2026-08-18,today=2026-08-19,overlap=7` makes `run-daily` request only `2026-08-11..2026-08-19`; spies prove no source reconcile/max-history/min-date path is invoked.
+- A4 (verifies R4): only explicit `reconcile` command can request maximum history; scheduler docs keep it separate from daily update.
+- A5 (verifies R5): default 13/filter/unknown/full-Gold behavior exact.
+- A6 (verifies R6): failure injection proves exact pre/post commit durable truth.
+- A7 (verifies R7): log/exit fixtures contain exact request window context and no secret.
+- A8 (verifies R8): full bootstrap/delta/revision/window-filter/explicit-reconcile/publication/resolution/retention/no-op scenario passes offline.
+- A9 (verifies R9): README documents delta-only daily execution and optional separate reconciliation; no scheduled CI ingestion exists.
 
 ## Definition Of MVP Complete
 
@@ -1080,13 +1121,16 @@ MVP is complete only when PR-01 through PR-23 are merged and:
 - implementation branches/commits follow the PR Git contract;
 - local/remote gates run four execution checks in parallel plus combined production coverage >=90%;
 - application follows documented ports/adapters and no provider conditional ladder leaks into orchestration;
-- bootstrap/incremental/periodic reconcile are restart-safe, no-op safe, and detect historical revisions beyond overlap without inferring deletions from omission;
-- Bronze/Silver use exact contracts, monthly affected-partition writes, and no synthetic observations;
+- first execution bootstraps maximum history only when Bronze is empty;
+- every normal `update`/`run-daily` for existing history derives its request start from **max stored observation date minus overlap**, never from historical minimum, and ends at injected today;
+- `date_range` providers perform exact bounded network requests for normal update; `full_file` providers may download full remote files only because of provider capability but must filter to the logical delta window before normal diff/persistence;
+- source full-history `reconcile` is explicit only and never auto-triggered by `run-daily`;
+- Bronze/Silver update only affected monthly partitions and normal source omission never deletes retained history;
 - Gold uses only canonical UTC `timestamp_m1`, explicit causal feature math, no NaN/infinity, and explicit semantic versions;
 - every build is immutable Parquet + artifact manifest + deterministic plot with reproducibility hashes;
 - build JSON never conflicts with catalog publication state because publication lifecycle exists only in `manifest.parquet`;
 - catalog resolution is pure/policy-driven, strict-current by default, filesystem-recency independent;
 - atomic catalog replacement is the Gold publication commit point; root JSON/PNG are recoverable materialized views;
 - retention tombstones catalog rows before deleting bundles and cannot create a selectable partial bundle;
-- daily pipeline logs deterministic context, handles pre/post commit failures correctly, and remains network-free in required integration tests;
+- daily pipeline logs exact delta request bounds, handles pre/post commit failures correctly, and remains network-free in required integration tests;
 - README, ARCHITECTURE, AGENTS, and BACKLOG remain synchronized.
