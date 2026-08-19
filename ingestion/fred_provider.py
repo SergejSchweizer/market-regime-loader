@@ -59,7 +59,9 @@ class FredProvider:
                 raise ValueError("FRED update requires exact bounded observation dates")
             params["observation_start"] = request.logical_start.isoformat()
         context = RequestContext(self.provider, series.series_id, series.source_id)
-        response = self._transport.send(HttpRequest("GET", self._endpoint, params=params), context=context)
+        response = self._transport.send(
+            HttpRequest("GET", self._endpoint, params=params), context=context
+        )
         if response.status_code != 200:
             raise ProviderHttpError(
                 context=context,
