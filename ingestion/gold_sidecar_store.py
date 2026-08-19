@@ -13,21 +13,21 @@ from io import BytesIO
 from pathlib import Path
 
 import matplotlib
-import polars as pl
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-from matplotlib.figure import Figure
+
+matplotlib.use("Agg")
+
+import polars as pl  # noqa: E402
+from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
+from matplotlib.figure import Figure  # noqa: E402
 
 from application.gold_frame import GOLD_COLUMNS
 from application.gold_sidecars import (
     GoldBuildManifest,
     GoldSidecarBuilder,
     expected_manifest_keys,
-    feature_set_sha256,
 )
 from application.paths import LakePaths
 from ingestion.gold_build_store import GoldBuildArtifact, GoldBuildStore
-
-matplotlib.use("Agg")
 
 FaultInjector = Callable[[str], None]
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -44,7 +44,11 @@ def _sha256(path: Path) -> str:
 def _create_bytes(path: Path, payload: bytes) -> None:
     """Durably create a file without an overwrite path."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    descriptor, temp_name = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+    )
     temp_path = Path(temp_name)
     try:
         with os.fdopen(descriptor, "wb") as handle:
@@ -56,15 +60,21 @@ def _create_bytes(path: Path, payload: bytes) -> None:
         temp_path.unlink(missing_ok=True)
 
 
-def _profile_png(frame: pl.DataFrame) -> bytes:
-    features = list(GOLD_COLUMNS[1:])
+def feature_profile_data(frame: pl.DataFrame) -> tuple[tuple[str, ...], tuple[float, ...]]:
+    """Return canonical feature order and deterministic non-null fractions for plotting."""
+    features = tuple(GOLD_COLUMNS[1:])
     if frame.columns != list(GOLD_COLUMNS):
         raise ValueError("Gold feature profile requires exact canonical column order")
     denominator = max(frame.height, 1)
-    coverage = [
+    coverage = tuple(
         (frame.height - frame.get_column(column).null_count()) / denominator
         for column in features
-    ]
+    )
+    return features, coverage
+
+
+def _profile_png(frame: pl.DataFrame) -> bytes:
+    features, coverage = feature_profile_data(frame)
     figure = Figure(figsize=(16, 8), dpi=100)
     canvas = FigureCanvasAgg(figure)
     axis = figure.add_subplot(1, 1, 1)
@@ -185,7 +195,7 @@ class GoldSidecarStore:
             raise ValueError("Gold build manifest data SHA-256 mismatch")
         if manifest.row_count != artifact.row_count:
             raise ValueError("Gold build manifest row count mismatch")
-        expected_feature_hash = feature_set_sha256(
+        expected_feature_hash = self._builder.feature_set_hash(
             frame,
             schema_version=manifest.schema_version,
             feature_version=manifest.feature_version,
