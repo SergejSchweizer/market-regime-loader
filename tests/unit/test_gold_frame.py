@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import statistics
 from datetime import UTC, date, datetime, timedelta
 
@@ -176,4 +175,4 @@ def test_provenance_signature_is_deterministic() -> None:
     first = assemble_gold_frame(volatility, macro, silver)
     second = assemble_gold_frame(volatility, macro, silver)
     assert first.inputs == second.inputs
-    assert all(math.isfinite(value) for value in first.frame.select(pl.Float64).to_numpy().ravel())
+    assert first.frame.equals(second.frame)
