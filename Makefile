@@ -32,4 +32,4 @@ quality-gate: clean-coverage
 	$(MAKE) coverage
 
 install-hooks:
-	./scripts/install_hooks.sh
+	bash scripts/install_hooks.sh
