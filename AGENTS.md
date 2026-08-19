@@ -11,8 +11,6 @@ Before changing code, read in this order:
 3. `README.md` — operator/consumer contract.
 4. This file — implementation behavior for agents.
 
-For scheduling, each PR's explicit `Depends on:` field is authoritative. The PR graph is a visualization only; if a diagram and a `Depends on:` field ever disagree, do not infer a dependency from the diagram. Fix the documentation ambiguity before implementation.
-
 If documents conflict, stop and fix the documentation contract in the current PR instead of guessing.
 
 ## One agent task = one backlog PR
@@ -32,7 +30,7 @@ The repository uses hexagonal architecture (Ports and Adapters) with composition
 Mandatory patterns where applicable:
 
 - **Adapter** — provider-specific HTTP/parsing and filesystem implementations sit behind application-facing ports.
-- **Strategy** — provider selection, retry behavior, planner/reconciliation behavior, and consumer resolution policies are explicit strategies/policies rather than scattered conditionals.
+- **Strategy** — provider selection, retry behavior, strict update/explicit reconciliation behavior, and consumer resolution policies are explicit strategies/policies rather than scattered conditionals.
 - **Registry/Factory** — canonical provider/series resolution is registry-driven; orchestration must not contain provider `if/elif` ladders.
 - **Repository** — Bronze/Silver/state/run-manifest/Gold-build/Gold-catalog persistence is accessed through narrow repositories/ports.
 - **Unit of Work** — a Bronze series execution and Gold publication each have an explicit durability/commit boundary.
@@ -55,12 +53,48 @@ api/scripts -> application/contracts <- ingestion adapters
 
 Provider adapters may depend on shared HTTP and parsing ports. They must not mutate ingestion state, run manifests, or portfolio/model state themselves.
 
+## Strict delta-update rules
+
+For an existing series, a normal `update` or `run-daily` must derive the request from the **newest durable Bronze observation**, never the historical minimum:
+
+```text
+latest_stored_date = max(Bronze.observation_date)
+request_start      = latest_stored_date - overlap_days
+request_end        = injected_today
+```
+
+Default overlap is seven calendar days.
+
+Mandatory implementation rules:
+
+- Empty Bronze may bootstrap maximum history.
+- Existing Bronze under normal `update`/`run-daily` must use the max-date-derived delta window.
+- Never use `min(Bronze.observation_date)` as the normal request start.
+- Never auto-switch normal update to source full-history `reconcile` because of elapsed time or state age.
+- `reconcile` is an explicit separate operator command only.
+- `date_range` providers must receive the exact bounded request.
+- `full_file` providers may download a complete remote object only because the source lacks range capability; they must filter parsed observations to the exact logical delta window before normal diff/persistence.
+- Out-of-window rows from a bounded provider are contract failures; out-of-window rows from a full-file provider are ignored during normal delta diff.
+- A shorter source response never deletes retained history.
+
+Every implementation touching planning, providers, Bronze orchestration, or `run-daily` must include the canonical regression case:
+
+```text
+min stored       = 2000-01-03
+latest stored    = 2026-08-18
+today            = 2026-08-19
+overlap          = 7
+expected request = 2026-08-11 .. 2026-08-19
+```
+
+A normal request from `2000-01-03` is a test failure.
+
 ## Data rules
 
 - Production dataframe operations are Polars-first. Do not introduce pandas into production code.
 - Bronze and Silver never fabricate missing market observations.
 - An upstream response becoming shorter is not evidence that retained history should be deleted.
-- Explicit provider reconciliation may revise equal-key observations; deletion semantics require an explicit contract and must never be inferred from omission.
+- Explicit source reconciliation may revise equal-key historical observations; deletion semantics require an explicit contract and must never be inferred from omission.
 - Gold uses only `timestamp_m1: Datetime(time_unit="us", time_zone="UTC")` as temporal key.
 - Gold UTC midnight is observation-day identity, not information-availability time.
 - Gold features are causal. No future observations, centered windows, forward fill, backward fill, or implicit as-of carry.
@@ -96,6 +130,7 @@ Do not weaken tests, exclude production files from coverage merely to reach 90%,
 - Prefer deterministic fixtures and injected clocks/sleepers/clients.
 - Provider unit tests must not call the network.
 - Test failures and recovery paths, not only happy paths.
+- For source ingestion, assert exact request bounds as well as resulting rows/partitions.
 - For persistence, assert logical state and physical invariants where relevant (hash/mtime/no orphan temp/current pointer).
 - For Gold features, use hand-calculable fixtures and truncation/causality regression tests.
 
