@@ -64,12 +64,14 @@ def _scalar() -> pl.DataFrame:
 
 
 def test_ohlc_maps_close_to_value_and_preserves_ohlc_exact_schema() -> None:
-    result = canonicalize_silver(series_contract("vix"), _ohlc())
+    contract = series_contract("vix")
+    result = canonicalize_silver(contract, _ohlc())
     assert tuple(result.columns) == SILVER_COLUMNS
     assert result.schema == SILVER_SCHEMA
     assert result.get_column("value").to_list() == [11.5, 12.5]
     assert result.get_column("close").to_list() == [11.5, 12.5]
-    assert result.get_column("unit").unique().item() == "index"
+    assert result.get_column("unit").unique().item() == contract.unit
+    assert contract.unit == "index_points"
     assert result.get_column("observation_date").to_list() == [
         date(2026, 8, 17),
         date(2026, 8, 19),
@@ -77,9 +79,11 @@ def test_ohlc_maps_close_to_value_and_preserves_ohlc_exact_schema() -> None:
 
 
 def test_scalar_maps_value_and_nullable_float_ohlc() -> None:
-    result = canonicalize_silver(series_contract("us_10y"), _scalar())
+    contract = series_contract("us_10y")
+    result = canonicalize_silver(contract, _scalar())
     assert result.get_column("value").to_list() == [4.1, 4.2]
-    assert result.get_column("unit").unique().item() == "percent"
+    assert result.get_column("unit").unique().item() == contract.unit
+    assert contract.unit == "percent"
     for column in ("open", "high", "low", "close"):
         assert result.schema[column] == pl.Float64
         assert result.get_column(column).null_count() == result.height
