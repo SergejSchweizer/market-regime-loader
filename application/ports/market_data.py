@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Literal, Protocol
 
+import polars as pl
+
 from application.contracts import Provider, SeriesContract
 
 ProviderOperation = Literal["bootstrap", "update", "reconcile"]
@@ -37,6 +39,6 @@ class MarketDataProvider(Protocol):
         """Return canonical provider identity."""
         ...
 
-    def fetch(self, series: SeriesContract, request: ProviderRequest) -> object:
+    def fetch(self, series: SeriesContract, request: ProviderRequest) -> pl.DataFrame:
         """Fetch one series while honoring the exact logical request contract."""
         ...
