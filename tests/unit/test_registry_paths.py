@@ -86,9 +86,7 @@ def test_registry_rejects_duplicate_series() -> None:
         ("fetch_capability", "date_range", "fetch_capability"),
     ],
 )
-def test_series_contract_rejects_invalid_metadata(
-    field: str, value: object, message: str
-) -> None:
+def test_series_contract_rejects_invalid_metadata(field: str, value: object, message: str) -> None:
     with pytest.raises(ValueError, match=message):
         _contract(**{field: value})
 

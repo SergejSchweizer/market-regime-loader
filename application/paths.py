@@ -19,9 +19,7 @@ class LakePaths:
 
     root: Path = Path("lake")
 
-    def bronze_month(
-        self, provider: Provider, series_id: str, observation_date: date
-    ) -> Path:
+    def bronze_month(self, provider: Provider, series_id: str, observation_date: date) -> Path:
         return (
             self.root
             / "bronze"
