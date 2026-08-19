@@ -39,7 +39,7 @@ The implementation uses **hexagonal architecture (Ports and Adapters)** with dep
 Core design patterns are deliberately explicit:
 
 - **Adapter** for provider and persistence implementations.
-- **Strategy** for retry/reconciliation and consumer-resolution policies.
+- **Strategy** for retry, update/reconciliation, and consumer-resolution policies.
 - **Registry/Factory** for canonical provider/series routing; orchestration must not use provider `if/elif` ladders.
 - **Repository** for Bronze, Silver, ingestion state, run manifests, Gold build storage, and the Gold catalog.
 - **Unit of Work** for one-series ingestion durability and Gold publication commit boundaries.
@@ -72,15 +72,48 @@ No additional MVP series may be introduced without a separate backlog PR and mat
 
 ## Source Update Policy
 
-The loader distinguishes three operation modes:
+The loader distinguishes three explicit operation modes:
 
 ```text
-bootstrap   -> first complete public history
-incremental -> recent correction overlap / bounded update
-reconcile   -> periodic full-history reconciliation
+bootstrap   -> first complete public history when no Bronze exists
+update      -> normal delta-only execution for an existing series
+reconcile   -> explicit operator-requested full-history reconciliation
 ```
 
-The default incremental overlap is seven calendar days. A periodic full reconciliation is required so revisions older than the overlap window can still be discovered. `full_file` providers naturally reconcile whenever fetched; `date_range` providers perform a full-history request on reconciliation runs.
+### Normal update is delta-only
+
+For an existing series, the authoritative Bronze data determines:
+
+```text
+latest_stored_date = max(Bronze.observation_date)
+request_start      = latest_stored_date - overlap_days
+request_end        = injected_today
+```
+
+Default `overlap_days = 7` calendar days so recent source corrections can still replace equal-key observations. The normal `update` command and `run-daily` **never automatically switch to full-history reconciliation**.
+
+Example:
+
+```text
+Bronze min date:       2000-01-03
+Bronze latest date:    2026-08-18
+injected today:        2026-08-19
+overlap:               7 days
+
+normal request window: 2026-08-11 .. 2026-08-19
+```
+
+The request must **not** start from `2000-01-03`. The oldest retained date is irrelevant to normal delta planning.
+
+For `date_range` providers, the network request must use those exact bounds. Providers may not silently expand a normal update into a maximum-history query.
+
+For `full_file` providers such as the catalogued CBOE/STOXX sources, the public source may only expose a complete file. In that case the complete remote object may have to be downloaded, but the adapter must restrict the logical update/diff to the requested delta window before persistence. Consequently, normal execution still rewrites only inserted/revised delta rows and affected monthly partitions. The project must not claim network-level delta retrieval where the upstream source does not support it.
+
+A provider response outside the normal logical window must not enlarge the accepted update scope. For bounded providers, out-of-window rows are an adapter/contract error; for full-file providers, out-of-window rows are ignored for the normal delta diff.
+
+### Explicit reconciliation
+
+`reconcile` is a separate explicit command. It may request maximum currently exposed history to detect older revisions outside the overlap window. It is **not invoked automatically by `run-daily`**. If operators want periodic reconciliation, they schedule the explicit `reconcile` command separately.
 
 A shorter upstream response is never interpreted as permission to delete older retained history. Equal-key observations may be revised. Explicit deletion semantics require an explicit provider contract and are not inferred from omission.
 
