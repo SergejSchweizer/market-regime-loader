@@ -11,7 +11,6 @@ import polars as pl
 
 from application.bronze_orchestration import BatchRunResult, BronzeOrchestrator
 from application.contracts import SeriesContract
-from application.gold_catalog import GoldCatalogRecord
 from application.gold_frame import GoldFrameBuild, assemble_gold_frame
 from application.gold_publication import GoldPublisher
 from application.gold_retention import GoldRetentionResult, GoldRetentionService
@@ -153,13 +152,7 @@ class DailyMedallionPipeline:
                 operation=OperationMode.UPDATE,
                 today=today,
             )
-            self._event(
-                run_id,
-                "run-daily",
-                stage="bronze",
-                status="success" if not bronze.failures else "failed",
-                failures=list(bronze.failures),
-            )
+            self._log_bronze_results(run_id, "run-daily", bronze)
             if bronze.failures:
                 raise ProviderBatchError(bronze.failures)
 
@@ -219,13 +212,7 @@ class DailyMedallionPipeline:
         run_id = self._start(command, selected)
         try:
             batch = self._bronze.run_many(selected, operation=operation, today=today)
-            self._event(
-                run_id,
-                command,
-                stage="bronze",
-                status="success" if not batch.failures else "failed",
-                failures=list(batch.failures),
-            )
+            self._log_bronze_results(run_id, command, batch)
             if batch.failures:
                 raise ProviderBatchError(batch.failures)
             self._finish(run_id, command, "success")
@@ -233,6 +220,47 @@ class DailyMedallionPipeline:
         except Exception:
             self._finish(run_id, command, "failed")
             raise
+
+    def _log_bronze_results(
+        self,
+        run_id: str,
+        command: str,
+        batch: BatchRunResult,
+    ) -> None:
+        for item in batch.successes:
+            self._event(
+                run_id,
+                command,
+                stage="bronze-series",
+                status="success",
+                series=item.series_id,
+                provider=item.provider.value,
+                mode=item.mode.value,
+                request_start=None
+                if item.request_start is None
+                else item.request_start.isoformat(),
+                request_end=item.request_end.isoformat(),
+                maximum_history=item.maximum_history,
+                inserted_rows=item.inserted_rows,
+                revised_rows=item.revised_rows,
+                written_partitions=item.written_partitions,
+            )
+        for series_id in batch.failures:
+            self._event(
+                run_id,
+                command,
+                stage="bronze-series",
+                status="failed",
+                series=series_id,
+                provider=self._series_registry[series_id].provider.value,
+            )
+        self._event(
+            run_id,
+            command,
+            stage="bronze",
+            status="success" if not batch.failures else "failed",
+            failures=list(batch.failures),
+        )
 
     def _build_selected_silver(
         self,
@@ -252,9 +280,7 @@ class DailyMedallionPipeline:
             series_id: self._silver.read(contract)
             for series_id, contract in self._series_registry.items()
         }
-        missing = [
-            series_id for series_id, frame in silver_by_series.items() if frame.is_empty()
-        ]
+        missing = [series_id for series_id, frame in silver_by_series.items() if frame.is_empty()]
         if missing:
             raise ValueError(
                 "full Gold requires non-empty Silver for every canonical series; missing: "
