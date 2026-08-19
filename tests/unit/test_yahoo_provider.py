@@ -32,7 +32,9 @@ def payload(days: list[date], closes: list[float | None] | None = None) -> bytes
     return json.dumps(
         {
             "chart": {
-                "result": [{"timestamp": [epoch(day) for day in days], "indicators": {"quote": [quote]}}],
+                "result": [
+                    {"timestamp": [epoch(day) for day in days], "indicators": {"quote": [quote]}}
+                ],
                 "error": None,
             }
         }
@@ -132,7 +134,9 @@ def test_invalid_payloads_are_rejected(content: bytes, error: str) -> None:
 
 
 def test_only_move_contract_and_strict_update_semantics_are_accepted() -> None:
-    provider = YahooMoveProvider(FakeTransport(HttpResponse(200, payload([END]), {})), clock=lambda: NOW)
+    provider = YahooMoveProvider(
+        FakeTransport(HttpResponse(200, payload([END]), {})), clock=lambda: NOW
+    )
     with pytest.raises(ValueError, match="unsupported Yahoo"):
         provider.fetch(series_contract("vix"), update_request())
     with pytest.raises(ValueError, match="exact bounded"):
@@ -146,10 +150,13 @@ def test_http_error_short_reconcile_and_naive_clock() -> None:
     unavailable = YahooMoveProvider(FakeTransport(HttpResponse(503, b"", {})), clock=lambda: NOW)
     with pytest.raises(ProviderHttpError):
         unavailable.fetch(series_contract("move"), update_request())
-    short = YahooMoveProvider(FakeTransport(HttpResponse(200, payload([END]), {})), clock=lambda: NOW)
-    assert short.fetch(
-        series_contract("move"), ProviderRequest("reconcile", None, END, True)
-    ).height == 1
+    short = YahooMoveProvider(
+        FakeTransport(HttpResponse(200, payload([END]), {})), clock=lambda: NOW
+    )
+    assert (
+        short.fetch(series_contract("move"), ProviderRequest("reconcile", None, END, True)).height
+        == 1
+    )
     naive = YahooMoveProvider(
         FakeTransport(HttpResponse(200, payload([END]), {})),
         clock=lambda: datetime(2026, 8, 19, 2),
