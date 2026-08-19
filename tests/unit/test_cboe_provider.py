@@ -13,7 +13,12 @@ from application.registry import series_contract
 from ingestion.cboe_provider import CboeProvider
 
 NOW = datetime(2026, 8, 19, 2, tzinfo=UTC)
-CSV = b"DATE,OPEN,HIGH,LOW,CLOSE\n08/10/2026,20,21,19,20.5\n08/11/2026,21,22,20,21.5\n08/19/2026,22,23,21,22.5\n"
+CSV = (
+    b"DATE,OPEN,HIGH,LOW,CLOSE\n"
+    b"08/10/2026,20,21,19,20.5\n"
+    b"08/11/2026,21,22,20,21.5\n"
+    b"08/19/2026,22,23,21,22.5\n"
+)
 
 
 class FakeTransport:
