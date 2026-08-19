@@ -4,9 +4,9 @@ import io
 import json
 from datetime import date
 
+from api.inventory import INVENTORY_FIELDS, run_inventory
 from application.contracts import Provider
 from application.operational_records import InventoryRecord
-from api.inventory import INVENTORY_FIELDS, run_inventory
 
 
 def _records() -> list[InventoryRecord]:
