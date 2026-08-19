@@ -120,9 +120,7 @@ class DailyMedallionPipeline:
                 build_id=published.build_id,
             )
             self._finish(run_id, "gold-build", "success")
-            return PipelineCommandResult(
-                "gold-build", run_id, (), gold_build_id=published.build_id
-            )
+            return PipelineCommandResult("gold-build", run_id, (), gold_build_id=published.build_id)
         except Exception:
             self._finish(run_id, "gold-build", "failed")
             raise
