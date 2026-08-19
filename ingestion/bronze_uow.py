@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -18,7 +18,12 @@ from application.ports.bronze import PreparedBronze
 from application.ports.lake import ObservationBounds
 from application.state import IngestionState
 from ingestion.operational_repository import upsert_run
-from ingestion.parquet_repository import atomic_write_parquet, diff_frames, merge_frames, observation_bounds, read_monthly
+from ingestion.parquet_repository import (
+    atomic_write_parquet,
+    merge_frames,
+    observation_bounds,
+    read_monthly,
+)
 from ingestion.state_repository import read_states, upsert_state
 
 FaultInjector = Callable[[str], None]
@@ -143,6 +148,8 @@ class FilesystemBronzeUnitOfWork:
 
     def prepare(self, contract: SeriesContract, incoming: pl.DataFrame) -> PreparedBronze:
         existing = read_monthly(self._series_paths(contract), sort_by=_KEY)
+        if not existing.columns:
+            existing = incoming.head(0)
         normalized = _stable_incoming(existing, incoming)
         merged, diff = merge_frames(existing, normalized, key=_KEY)
         months = _changed_months(diff.changed)
@@ -162,8 +169,12 @@ class FilesystemBronzeUnitOfWork:
     ) -> None:
         months = _changed_months(prepared.diff.changed)
         bronze_targets = [
-            self._paths.bronze_month(prepared.contract.provider, prepared.contract.series_id, date(y, m, 1))
-            for y, m in months
+            self._paths.bronze_month(
+                prepared.contract.provider,
+                prepared.contract.series_id,
+                date(year, month, 1),
+            )
+            for year, month in months
         ]
         tracked = [*bronze_targets, self._paths.ingestion_runs(), self._paths.ingestion_state()]
         backups = [_backup(path) for path in tracked]
