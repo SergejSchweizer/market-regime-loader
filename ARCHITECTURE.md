@@ -6,7 +6,7 @@ This document is the durable engineering contract for `market-regime-loader`.
 
 ## System Purpose
 
-`market-regime-loader` is a reusable daily market-state data product. It acquires open/public market and macro series, preserves historical observations, normalizes them into a canonical daily representation, derives causal reusable features, and publishes immutable Gold snapshots.
+`market-regime-loader` is a reusable daily market-state data product. It acquires open/public market and macro series, preserves historical observations, performs bounded incremental source updates during normal operation, normalizes data into a canonical daily representation, derives causal reusable features, and publishes immutable Gold snapshots.
 
 It does not own regime classification, HMM states, targets, portfolio optimization, position sizing, or trading execution.
 
@@ -50,7 +50,7 @@ Concrete CBOE/STOXX/Yahoo/ECB/FRED implementations adapt provider protocols into
 Use explicit strategy/policy objects for behavior that may vary independently:
 
 - HTTP retry policy;
-- incremental versus reconciliation planning;
+- strict normal update versus explicit full reconciliation planning;
 - consumer resolution (`strict_current` versus `latest_compatible`).
 
 Do not scatter equivalent behavior across provider-specific conditionals.
@@ -286,40 +286,71 @@ Rules:
 - finite non-null `value` only;
 - deterministic selected-series rebuild and monthly diff/write.
 
-## Update And Revision Policy
+## Strict Source Update Contract
 
 The planner exposes three explicit operation modes:
 
 ```text
 bootstrap
-incremental
+update
 reconcile
 ```
 
 ### Bootstrap
 
-No Bronze history: request maximum public history exposed by the configured source.
+When authoritative Bronze has no observation for a selected series, request maximum public history exposed by the configured source.
 
-### Incremental
+### Normal Update
 
-Existing history:
+When Bronze exists, calculate the logical request window from the **newest durable Bronze observation**:
 
 ```text
-logical_start = latest_stored_date - overlap_days
-logical_end   = injected_today
+latest_stored_date = max(Bronze.observation_date)
+request_start      = latest_stored_date - overlap_days
+request_end        = injected_today
 ```
 
-Default overlap is seven calendar days.
+Default overlap is seven calendar days. The overlap exists only to capture recent source revisions.
 
-`date_range` providers receive exact logical bounds. `full_file` providers fetch the complete compact file but still record logical bounds for audit.
+The historical minimum is explicitly **not** part of normal delta planning:
 
-### Reconcile
+```text
+min(Bronze.observation_date) != request_start
+```
 
-A configurable periodic reconciliation, default seven days, re-requests maximum currently exposed history for the selected series. This catches revisions older than the incremental overlap window.
+Canonical example:
+
+```text
+min stored       = 2000-01-03
+latest stored    = 2026-08-18
+today            = 2026-08-19
+overlap          = 7 days
+normal request   = 2026-08-11 .. 2026-08-19
+```
+
+A normal update requesting `2000-01-03 .. 2026-08-19` is a contract violation.
+
+Additional invariants:
+
+- `latest_stored_date` comes from authoritative Bronze; state is a cache/audit record and cannot broaden the request.
+- if `request_end < latest_stored_date`, execution fails.
+- `date_range` providers receive the exact bounded start/end and may not silently broaden to maximum history.
+- bounded-provider rows outside the requested interval are contract errors.
+- `full_file` providers may have to download their entire compact public object because the upstream source exposes no bounded endpoint; during normal update they must filter parsed observations to the exact logical window before diff/persistence.
+- full-file out-of-window rows are ignored during normal delta diff and must not trigger old-month rewrites.
+- source omission/shortening never deletes older retained history.
+
+This distinction is deliberate: the project guarantees **logical/persistence delta-only normal execution** for all providers and **network-level delta retrieval where the provider supports date bounds**. It does not falsely claim network-level delta for public full-file-only sources.
+
+### Explicit Reconcile
+
+`reconcile` is an explicit operator command that may request maximum currently exposed source history to discover revisions older than the normal overlap window.
+
+`run-daily` and normal `update` must **never automatically choose `reconcile`** based on elapsed time, state age, or any hidden policy. If periodic reconciliation is desired, it is scheduled as a separate explicit command.
 
 Reconciliation still obeys the rule that source omission is not deletion. Explicit deletion handling requires a separate source-mutation contract.
 
-State tracks at least last success, last observation, requested bounds, mode, row counts, and last successful reconciliation time.
+State tracks at least last success, last observation cache, requested bounds, operation mode, fetched/accepted/changed row counts, and optional last successful explicit reconciliation time.
 
 ## One-Series Ingestion Unit Of Work
 
@@ -328,6 +359,7 @@ Application orchestration follows:
 ```text
 plan
  -> provider fetch/parse
+ -> enforce logical request window
  -> logical diff
  -> durable Bronze write
  -> durable success run manifest
@@ -527,7 +559,7 @@ are derived from authoritative catalog/current build.
 
 They are refreshed after each successful catalog mutation and reconciled on startup/publication entry. If refresh fails after a catalog commit, return an operational error but do not pretend the catalog commit rolled back. A later reconciliation regenerates the views.
 
-This is intentionally not described as an atomic three-file transaction.
+This Gold-view reconciliation is unrelated to market-source full-history `reconcile`.
 
 ## Retention: Mark And Sweep
 
@@ -561,7 +593,9 @@ Current/building/failed/other-version rows are never pruned. Repeated retention 
 
 `dataset_inventory.parquet` is a snapshot of observed Bronze coverage, not a synthetic market calendar. It records canonical identity, provider, min/max observed date, row count, duplicate-key count, and physical file count.
 
-`ingestion_runs.parquet` records run ID, series/provider, operation mode, requested bounds, fetched/inserted/revised rows, written partitions, status, timestamps, and sanitized error metadata.
+For normal source update planning, **max observed date is relevant; min observed date is not the update start**.
+
+`ingestion_runs.parquet` records run ID, series/provider, operation mode, requested bounds, fetched/accepted/inserted/revised rows, written partitions, status, timestamps, and sanitized error metadata.
 
 No secrets may appear in registry files, persisted URLs, logs, error strings, or fixtures.
 
@@ -572,7 +606,9 @@ No secrets may appear in registry files, persisted URLs, logs, error strings, or
 ```text
 1. recover stale Gold building attempts
 2. reconcile root Gold materialized views if needed
-3. choose incremental/reconcile plans
+3. for each selected series:
+      no Bronze -> bootstrap
+      Bronze exists -> strict update from latest-overlap through today
 4. Bronze selected/all series
 5. Silver selected/all series
 6. build full canonical Gold from current Silver
@@ -583,6 +619,8 @@ No secrets may appear in registry files, persisted URLs, logs, error strings, or
 11. mark-and-sweep retention
 12. refresh inventory
 ```
+
+`run-daily` must never invoke market-source full-history `reconcile` for an existing series. The source `reconcile` command is separate and explicit.
 
 Gold always uses the full canonical schema from all available Silver inputs even when Bronze/Silver source execution was filtered.
 
@@ -623,6 +661,10 @@ Required classes include:
 - exact schema/type/order tests;
 - provider parsing fixtures;
 - retry/error/secret-redaction tests;
+- canonical delta request tests proving max-date-derived bounds and rejecting historical-minimum requests;
+- `date_range` exact-bound tests;
+- `full_file` post-fetch logical-window filtering tests;
+- assertions that `run-daily` never auto-invokes source reconcile;
 - no-op hash/mtime tests;
 - failure injection around durability boundaries;
 - restart/recovery tests;
@@ -631,10 +673,10 @@ Required classes include:
 - catalog resolution policy tests;
 - materialized-view reconciliation tests;
 - retention tombstone/orphan-cleanup tests;
-- end-to-end bootstrap/incremental/reconcile/publication regression.
+- end-to-end bootstrap/delta/explicit-reconcile/publication regression.
 
 ## Relationship To `crypto-history-loader`
 
 `crypto-history-loader` remains the design reference for deterministic medallion ownership, Polars/Parquet persistence, restart safety, `timestamp_m1`, Gold JSON manifests, and feature-profile plots.
 
-`market-regime-loader` intentionally uses daily source semantics, monthly Bronze/Silver partitions, explicit periodic reconciliation, and a catalog-driven immutable Gold publication model.
+`market-regime-loader` intentionally uses daily source semantics, monthly Bronze/Silver partitions, strict delta-only normal execution, optional explicit source reconciliation, and a catalog-driven immutable Gold publication model.
