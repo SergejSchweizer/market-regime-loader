@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from datetime import UTC, date, datetime, time, timedelta
 import json
 import math
+from collections.abc import Callable
+from datetime import UTC, date, datetime, time, timedelta
 from urllib.parse import quote
 
 import polars as pl
