@@ -71,11 +71,7 @@ def _patched_runtime(monkeypatch: pytest.MonkeyPatch, pipeline: DummyPipeline) -
 
 def test_parser_exposes_exact_operational_command_surface() -> None:
     parser = cli.build_parser()
-    commands = {
-        action.dest: action
-        for action in parser._actions
-        if action.dest == "command"
-    }
+    commands = {action.dest: action for action in parser._actions if action.dest == "command"}
     choices = set(commands["command"].choices)
     assert choices == {
         "bootstrap",
@@ -88,7 +84,9 @@ def test_parser_exposes_exact_operational_command_surface() -> None:
     }
 
 
-def test_main_dispatches_run_daily_with_injected_today_and_series(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_dispatches_run_daily_with_injected_today_and_series(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     pipeline = DummyPipeline()
     runtime = _patched_runtime(monkeypatch, pipeline)
     stdout = io.StringIO()
@@ -170,7 +168,9 @@ def test_required_provider_selection_is_series_scoped_and_validated() -> None:
         cli._required_provider_ids("run-daily", ("missing",))
 
 
-def test_overlap_days_and_git_config_errors_are_input_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_overlap_days_and_git_config_errors_are_input_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(cli, "_git_commit_hash", lambda: "f" * 40)
     with pytest.raises(ValueError, match="non-negative"):
         cli.build_runtime(
