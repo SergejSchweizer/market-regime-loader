@@ -12,7 +12,11 @@ from application.gold_frame import GOLD_COLUMNS
 from application.gold_sidecars import GoldSidecarBuilder
 from application.paths import LakePaths
 from ingestion.gold_build_store import GoldBuildStore
-from ingestion.gold_sidecar_store import GoldSidecarArtifacts, GoldSidecarStore, feature_profile_data
+from ingestion.gold_sidecar_store import (
+    GoldSidecarArtifacts,
+    GoldSidecarStore,
+    feature_profile_data,
+)
 
 START = datetime(2026, 8, 19, 2, tzinfo=UTC)
 GIT_SHA = "c" * 40
