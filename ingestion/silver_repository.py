@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import date
 from pathlib import Path
 
 import polars as pl
@@ -36,12 +35,12 @@ class SilverSeriesRepository:
         return tuple(sorted(root.glob("year=*/month=*/data.parquet"))) if root.exists() else ()
 
     def read(self, contract: SeriesContract) -> pl.DataFrame:
-        frame = read_monthly(self._silver_paths(contract), sort_by=_SILVER_KEY)
+        frame = read_monthly(self._silver_paths(contract), sort_by=())
         if not frame.columns:
             return pl.DataFrame(schema=SILVER_SCHEMA)
         if frame.schema != SILVER_SCHEMA:
             raise ValueError("invalid persisted Silver schema")
-        return frame
+        return frame.sort(list(_SILVER_KEY))
 
     def build(self, contract: SeriesContract) -> FrameDiff:
         bronze = read_monthly(
@@ -50,13 +49,11 @@ class SilverSeriesRepository:
         )
         candidate = canonicalize_silver(contract, bronze)
         existing = self.read(contract)
-        _, diff = upsert_monthly(
+        diff, _ = upsert_monthly(
             existing,
             candidate,
             key=_SILVER_KEY,
-            destination_for_month=lambda year, month: self._paths.silver_month(
-                contract.series_id,
-                date(year, month, 1),
-            ),
+            date_column="observation_date",
+            path_for_date=lambda day: self._paths.silver_month(contract.series_id, day),
         )
         return diff
