@@ -58,9 +58,10 @@ def build_plan(
     *,
     today: date,
     explicit_reconcile: bool = False,
-    config: PlannerConfig = PlannerConfig(),
+    config: PlannerConfig | None = None,
 ) -> FetchInstruction:
     """Build a deterministic provider-neutral plan from authoritative Bronze bounds."""
+    effective_config = config if config is not None else PlannerConfig()
     mode = choose_mode(bounds, explicit_reconcile=explicit_reconcile)
     latest = bounds.maximum
 
@@ -89,7 +90,7 @@ def build_plan(
             filter_end=None,
         )
 
-    request_start = latest - timedelta(days=config.overlap_days)
+    request_start = latest - timedelta(days=effective_config.overlap_days)
     if contract.fetch_capability is FetchCapability.DATE_RANGE:
         return FetchInstruction(
             mode=mode,
