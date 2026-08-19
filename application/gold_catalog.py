@@ -71,8 +71,7 @@ class GoldResolutionStrategy(Protocol):
         self,
         records: Sequence[GoldCatalogRecord],
         compatibility: GoldCompatibility,
-    ) -> GoldCatalogRecord:
-        ...
+    ) -> GoldCatalogRecord: ...
 
 
 def _single_current(records: Sequence[GoldCatalogRecord]) -> GoldCatalogRecord | None:
@@ -80,6 +79,13 @@ def _single_current(records: Sequence[GoldCatalogRecord]) -> GoldCatalogRecord |
     if len(current) > 1:
         raise ValueError("Gold catalog contains multiple current rows")
     return current[0] if current else None
+
+
+def _completed_key(record: GoldCatalogRecord) -> tuple[datetime, str]:
+    completed = record.completed_at_utc
+    if completed is None:
+        raise ValueError("selectable Gold build must have completed_at_utc")
+    return completed, record.build_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,11 +117,7 @@ class LatestCompatibleResolution:
         compatibility: GoldCompatibility,
     ) -> GoldCatalogRecord:
         current = _single_current(records)
-        if (
-            current is not None
-            and current.selectable_complete
-            and compatibility.matches(current)
-        ):
+        if current is not None and current.selectable_complete and compatibility.matches(current):
             return current
         candidates = [
             record
@@ -124,10 +126,7 @@ class LatestCompatibleResolution:
         ]
         if not candidates:
             raise LookupError("Gold catalog has no compatible complete build")
-        return max(
-            candidates,
-            key=lambda record: (record.completed_at_utc, record.build_id),
-        )
+        return max(candidates, key=_completed_key)
 
 
 STRICT_CURRENT = StrictCurrentResolution()
