@@ -1,0 +1,156 @@
+"""Source-controlled canonical market-series registry."""
+
+from __future__ import annotations
+
+from application.contracts import (
+    BootstrapPolicy,
+    FetchCapability,
+    Frequency,
+    NativeShape,
+    Provider,
+    SeriesContract,
+    validate_series_registry,
+)
+
+INITIAL_SERIES: tuple[SeriesContract, ...] = (
+    SeriesContract(
+        "vix",
+        Provider.CBOE,
+        "VIX_History.csv",
+        "index_points",
+        NativeShape.OHLC,
+        Frequency.DAILY,
+        BootstrapPolicy.MAXIMUM_EXPOSED_HISTORY,
+        FetchCapability.FULL_FILE,
+    ),
+    SeriesContract(
+        "vix9d",
+        Provider.CBOE,
+        "VIX9D_History.csv",
+        "index_points",
+        NativeShape.OHLC,
+        Frequency.DAILY,
+        BootstrapPolicy.MAXIMUM_EXPOSED_HISTORY,
+        FetchCapability.FULL_FILE,
+    ),
+    SeriesContract(
+        "vix3m",
+        Provider.CBOE,
+        "VIX3M_History.csv",
+        "index_points",
+        NativeShape.OHLC,
+        Frequency.DAILY,
+        BootstrapPolicy.MAXIMUM_EXPOSED_HISTORY,
+        FetchCapability.FULL_FILE,
+    ),
+    SeriesContract(
+        "vix6m",
+        Provider.CBOE,
+        "VIX6M_History.csv",
+        "index_points",
+        NativeShape.OHLC,
+        Frequency.DAILY,
+        BootstrapPolicy.MAXIMUM_EXPOSED_HISTORY,
+        FetchCapability.FULL_FILE,
+    ),
+    SeriesContract(
+        "vix1y",
+        Provider.CBOE,
+        "VIX1Y_History.csv",
+        "index_points",
+        NativeShape.OHLC,
+        Frequency.DAILY,
+        BootstrapPolicy.MAXIMUM_EXPOSED_HISTORY,
+        FetchCapability.FULL_FILE,
+    ),
+    SeriesContract(
+        "vstoxx",
+        Provider.STOXX,
+        "V2TX",
+        "index_points",
+        NativeShape.SCALAR,
+        Frequency.DAILY,
+        BootstrapPolicy.MAXIMUM_EXPOSED_HISTORY,
+        FetchCapability.FULL_FILE,
+    ),
+    SeriesContract(
+        "move",
+        Provider.YAHOO,
+        "^MOVE",
+        "index_points",
+        NativeShape.OHLC,
+        Frequency.DAILY,
+        BootstrapPolicy.MAXIMUM_EXPOSED_HISTORY,
+        FetchCapability.DATE_RANGE,
+    ),
+    SeriesContract(
+        "ciss",
+        Provider.ECB,
+        "CISS.D.U2.Z0Z.4F.EC.SS_CIN.IDX",
+        "index",
+        NativeShape.SCALAR,
+        Frequency.DAILY,
+        BootstrapPolicy.MAXIMUM_EXPOSED_HISTORY,
+        FetchCapability.DATE_RANGE,
+    ),
+    SeriesContract(
+        "estr",
+        Provider.ECB,
+        "EST.B.EU000A2X2A25.WT",
+        "percent",
+        NativeShape.SCALAR,
+        Frequency.DAILY,
+        BootstrapPolicy.MAXIMUM_EXPOSED_HISTORY,
+        FetchCapability.DATE_RANGE,
+    ),
+    SeriesContract(
+        "euro_hy_oas",
+        Provider.FRED,
+        "BAMLHE00EHYIOAS",
+        "percent",
+        NativeShape.SCALAR,
+        Frequency.DAILY,
+        BootstrapPolicy.MAXIMUM_EXPOSED_HISTORY,
+        FetchCapability.DATE_RANGE,
+    ),
+    SeriesContract(
+        "us_2y",
+        Provider.FRED,
+        "DGS2",
+        "percent",
+        NativeShape.SCALAR,
+        Frequency.DAILY,
+        BootstrapPolicy.MAXIMUM_EXPOSED_HISTORY,
+        FetchCapability.DATE_RANGE,
+    ),
+    SeriesContract(
+        "us_10y",
+        Provider.FRED,
+        "DGS10",
+        "percent",
+        NativeShape.SCALAR,
+        Frequency.DAILY,
+        BootstrapPolicy.MAXIMUM_EXPOSED_HISTORY,
+        FetchCapability.DATE_RANGE,
+    ),
+    SeriesContract(
+        "usd_broad",
+        Provider.FRED,
+        "DTWEXBGS",
+        "index",
+        NativeShape.SCALAR,
+        Frequency.DAILY,
+        BootstrapPolicy.MAXIMUM_EXPOSED_HISTORY,
+        FetchCapability.DATE_RANGE,
+    ),
+)
+
+SERIES_REGISTRY = validate_series_registry(INITIAL_SERIES)
+
+
+def series_contract(series_id: str) -> SeriesContract:
+    """Resolve one canonical series or fail explicitly."""
+    try:
+        return SERIES_REGISTRY[series_id]
+    except KeyError as exc:
+        raise KeyError(f"unknown canonical series_id: {series_id}") from exc
