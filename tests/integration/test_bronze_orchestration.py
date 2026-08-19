@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -16,7 +17,6 @@ from application.ports.market_data import ProviderRequest
 from application.registry import SERIES_REGISTRY
 from ingestion.bronze_uow import FilesystemBronzeUnitOfWork
 from ingestion.operational_repository import read_runs
-from ingestion.state_repository import read_states
 
 pytestmark = pytest.mark.integration
 NOW = datetime(2026, 8, 19, 2, tzinfo=UTC)
@@ -77,7 +77,7 @@ class FakeFredProvider:
         )
 
 
-def _run_ids() -> callable:
+def _run_ids() -> Callable[[str], str]:
     counter = 0
 
     def next_id(series_id: str) -> str:
@@ -92,7 +92,7 @@ def _service(
     tmp_path: Path,
     provider: FakeFredProvider,
     *,
-    fault=None,
+    fault: Callable[[str], None] | None = None,
 ) -> tuple[BronzeOrchestrator, FilesystemBronzeUnitOfWork, LakePaths]:
     paths = LakePaths(tmp_path / "lake")
     uow = FilesystemBronzeUnitOfWork(paths, secrets=("SECRET",), fault_injector=fault)
@@ -148,7 +148,10 @@ def test_canonical_delta_bootstrap_update_noop_and_revision(tmp_path: Path) -> N
     revision = service.run_series("us_10y", today=TODAY)
     assert revision.revised_rows == 1
     assert revision.written_partitions == 1
-    assert pl.read_parquet(august).filter(pl.col("observation_date") == TODAY).item(0, "value") == 9.9
+    assert (
+        pl.read_parquet(august).filter(pl.col("observation_date") == TODAY).item(0, "value")
+        == 9.9
+    )
     runs = read_runs(paths.ingestion_runs())
     assert [run.requested_start for run in runs[-3:]] == [
         date(2026, 8, 11),
@@ -226,11 +229,7 @@ def test_multi_series_failure_isolation_and_safe_failure_record(tmp_path: Path) 
 
 def test_application_orchestrator_has_no_provider_implementation_or_http_imports() -> None:
     tree = ast.parse(Path("application/bronze_orchestration.py").read_text())
-    imports = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.Import, ast.ImportFrom))
-    ]
+    imports = [node for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom))]
     assert not any(
         isinstance(node, ast.ImportFrom)
         and node.module is not None
@@ -238,7 +237,13 @@ def test_application_orchestrator_has_no_provider_implementation_or_http_imports
         for node in imports
     )
     source = Path("application/bronze_orchestration.py").read_text()
-    for concrete in ("CboeProvider", "StoxxProvider", "YahooMoveProvider", "EcbProvider", "FredProvider"):
+    for concrete in (
+        "CboeProvider",
+        "StoxxProvider",
+        "YahooMoveProvider",
+        "EcbProvider",
+        "FredProvider",
+    ):
         assert concrete not in source
 
 
