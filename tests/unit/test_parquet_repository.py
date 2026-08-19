@@ -36,8 +36,8 @@ def test_repository_implements_protocol_and_delegates(tmp_path: Path) -> None:
 
 
 def test_protocol_stub_methods_are_executable_for_coverage() -> None:
-    read_stub = getattr(MonthlyFrameRepository, "read")
-    bounds_stub = getattr(MonthlyFrameRepository, "observation_bounds")
+    read_stub = MonthlyFrameRepository.read
+    bounds_stub = MonthlyFrameRepository.observation_bounds
     assert read_stub(object(), [], sort_by=[]) is None
     assert bounds_stub(object(), []) is None
 
