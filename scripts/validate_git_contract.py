@@ -12,6 +12,7 @@ SUBJECT_RE = re.compile(
     r"^(?P<type>feat|fix|docs|test|refactor|perf|build|ci|chore)"
     r"\(pr-(?P<number>\d{2})\): (?P<description>[a-z0-9].+)$"
 )
+SYNTHETIC_PR_MERGE_RE = re.compile(r"^Merge [0-9a-f]{40} into [0-9a-f]{40}$")
 
 
 def branch_pr_id(branch: str) -> str:
@@ -34,14 +35,22 @@ def validate_subject(subject: str, expected_pr_id: str) -> None:
         )
 
 
+def _subjects_for_event(subjects: Sequence[str], event: str) -> list[str]:
+    """Remove only GitHub-generated synthetic merge subjects where applicable."""
+    if event != "pull_request":
+        return list(subjects)
+    return [subject for subject in subjects if SYNTHETIC_PR_MERGE_RE.fullmatch(subject) is None]
+
+
 def validate_contract(branch: str, subjects: Sequence[str], *, event: str = "local") -> None:
     """Validate all implementation commit subjects for a feature branch."""
     if event == "merge_group" or branch == "main":
         return
     expected = branch_pr_id(branch)
-    if not subjects:
+    implementation_subjects = _subjects_for_event(subjects, event)
+    if not implementation_subjects:
         raise ValueError("no implementation commits found for validation")
-    for subject in subjects:
+    for subject in implementation_subjects:
         validate_subject(subject, expected)
 
 
