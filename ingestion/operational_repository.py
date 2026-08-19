@@ -7,38 +7,41 @@ from pathlib import Path
 import polars as pl
 
 from application.contracts import Provider
-from application.operational_records import IngestionRunRecord, InventoryRecord, RunStatus
-from application.planner import OperationMode
+from application.operational_records import IngestionRunRecord, InventoryRecord, RunMode, RunStatus
 from ingestion.parquet_repository import atomic_write_parquet
 
-INVENTORY_SCHEMA: dict[str, pl.DataType] = {
-    "series_id": pl.String,
-    "provider": pl.String,
-    "min_observation_date": pl.Date,
-    "max_observation_date": pl.Date,
-    "row_count": pl.Int64,
-    "duplicate_key_count": pl.Int64,
-    "file_count": pl.Int64,
-}
+INVENTORY_SCHEMA = pl.Schema(
+    {
+        "series_id": pl.String,
+        "provider": pl.String,
+        "min_observation_date": pl.Date,
+        "max_observation_date": pl.Date,
+        "row_count": pl.Int64,
+        "duplicate_key_count": pl.Int64,
+        "file_count": pl.Int64,
+    }
+)
 
-RUN_SCHEMA: dict[str, pl.DataType] = {
-    "run_id": pl.String,
-    "provider": pl.String,
-    "series_id": pl.String,
-    "mode": pl.String,
-    "requested_start": pl.Date,
-    "requested_end": pl.Date,
-    "fetched_rows": pl.Int64,
-    "accepted_rows": pl.Int64,
-    "inserted_rows": pl.Int64,
-    "revised_rows": pl.Int64,
-    "written_partitions": pl.Int64,
-    "status": pl.String,
-    "started_at_utc": pl.Datetime("us", "UTC"),
-    "completed_at_utc": pl.Datetime("us", "UTC"),
-    "error_category": pl.String,
-    "error_message": pl.String,
-}
+RUN_SCHEMA = pl.Schema(
+    {
+        "run_id": pl.String,
+        "provider": pl.String,
+        "series_id": pl.String,
+        "mode": pl.String,
+        "requested_start": pl.Date,
+        "requested_end": pl.Date,
+        "fetched_rows": pl.Int64,
+        "accepted_rows": pl.Int64,
+        "inserted_rows": pl.Int64,
+        "revised_rows": pl.Int64,
+        "written_partitions": pl.Int64,
+        "status": pl.String,
+        "started_at_utc": pl.Datetime("us", "UTC"),
+        "completed_at_utc": pl.Datetime("us", "UTC"),
+        "error_category": pl.String,
+        "error_message": pl.String,
+    }
+)
 
 
 def _sanitize(text: str | None, secrets: tuple[str, ...]) -> str | None:
@@ -83,7 +86,7 @@ def read_inventory(path: Path) -> list[InventoryRecord]:
     if not path.is_file():
         return []
     frame = pl.read_parquet(path)
-    if frame.schema != pl.Schema(INVENTORY_SCHEMA):
+    if frame.schema != INVENTORY_SCHEMA:
         raise ValueError("invalid inventory schema")
     return [
         InventoryRecord(
@@ -145,14 +148,14 @@ def read_runs(path: Path) -> list[IngestionRunRecord]:
     if not path.is_file():
         return []
     frame = pl.read_parquet(path)
-    if frame.schema != pl.Schema(RUN_SCHEMA):
+    if frame.schema != RUN_SCHEMA:
         raise ValueError("invalid ingestion-run schema")
     return [
         IngestionRunRecord(
             run_id=row["run_id"],
             provider=Provider(row["provider"]),
             series_id=row["series_id"],
-            mode=OperationMode(row["mode"]),
+            mode=RunMode(row["mode"]),
             requested_start=row["requested_start"],
             requested_end=row["requested_end"],
             fetched_rows=row["fetched_rows"],
