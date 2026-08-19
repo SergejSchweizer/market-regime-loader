@@ -49,14 +49,13 @@ def _all_silver(length: int = 61) -> dict[str, pl.DataFrame]:
     }
 
 
-def _feature_frame(columns: tuple[str, ...], timestamps: list[datetime], base: float) -> pl.DataFrame:
+def _feature_frame(
+    columns: tuple[str, ...], timestamps: list[datetime], base: float
+) -> pl.DataFrame:
     return pl.DataFrame(
         {
             "timestamp_m1": timestamps,
-            **{
-                column: [base + index for index in range(len(timestamps))]
-                for column in columns
-            },
+            **{column: [base + index for index in range(len(timestamps))] for column in columns},
         },
         schema={
             "timestamp_m1": pl.Datetime("us", "UTC"),
