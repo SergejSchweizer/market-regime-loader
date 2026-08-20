@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
 import polars as pl
 import pytest
 
 from application.bronze_orchestration import BatchRunResult, SeriesRunResult
-from application.contracts import Provider, SeriesContract
+from application.contracts import SeriesContract
 from application.daily_pipeline import DailyMedallionPipeline, ProviderBatchError
 from application.gold_catalog import GoldBuildStatus, GoldCatalogRecord
 from application.gold_frame import GOLD_COLUMNS, GOLD_SOURCE_SERIES
