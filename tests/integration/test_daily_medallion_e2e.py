@@ -242,9 +242,9 @@ def test_full_offline_daily_delta_reconcile_publication_retention_and_inventory(
     assert all(not result.maximum_history for result in second.bronze.successes)
     assert _sha(july_silver) == july_hash_before
     assert _sha(august_silver) != august_hash_before
-    assert pl.read_parquet(august_silver).filter(
-        pl.col("observation_date") == revision_day
-    ).item(0, "value") == pytest.approx(9.99)
+    assert pl.read_parquet(august_silver).filter(pl.col("observation_date") == revision_day).item(
+        0, "value"
+    ) == pytest.approx(9.99)
 
     euro_hy_bronze = sorted(
         (paths.root / "bronze" / "provider=fred" / "series=euro_hy_oas").glob(
@@ -309,12 +309,9 @@ def test_full_offline_daily_delta_reconcile_publication_retention_and_inventory(
     assert gold.get_column("timestamp_m1").is_sorted()
     assert gold.get_column("timestamp_m1").is_duplicated().sum() == 0
     assert "observation_date" not in gold.columns
+    assert gold.filter(pl.col("timestamp_m1") == datetime(2026, 8, 19, tzinfo=UTC)).height == 1
     assert (
-        gold.filter(pl.col("timestamp_m1") == datetime(2026, 8, 19, tzinfo=UTC)).height == 1
-    )
-    assert (
-        paths.gold_profile().read_bytes()
-        == paths.gold_build_profile(current.build_id).read_bytes()
+        paths.gold_profile().read_bytes() == paths.gold_build_profile(current.build_id).read_bytes()
     )
 
     inventory = read_inventory(paths.inventory())
