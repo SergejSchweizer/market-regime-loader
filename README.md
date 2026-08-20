@@ -8,7 +8,7 @@ The project is intentionally a **data product**, not a trading system. It does n
 
 ## Status
 
-The repository is currently at the reviewed architecture/backlog stage. Production code and CI are introduced by the atomic PR sequence in `BACKLOG.md`.
+The reviewed medallion architecture is implemented through the atomic PR sequence in `BACKLOG.md`: provider ingestion, incremental Bronze, canonical Silver, causal Gold features, immutable Gold bundles, authoritative catalog publication, materialized root views, retention, and the operational CLI are covered by the repository quality gates.
 
 Before implementing a backlog PR, coding agents must read `AGENTS.md`, `BACKLOG.md`, and `ARCHITECTURE.md`.
 
@@ -241,7 +241,7 @@ The publication authority is:
 lake/gold/dataset=regime_features_daily/manifest.parquet
 ```
 
-Planned catalog fields:
+Catalog fields:
 
 ```text
 dataset_id
@@ -319,6 +319,125 @@ Retention uses mark-and-sweep:
 
 The catalog is therefore never left pointing at a partially deleted selectable bundle.
 
+## Operational CLI
+
+Install/sync the project and use the console entry point:
+
+```bash
+uv sync
+uv run market-regime-loader --help
+```
+
+The exact command surface is:
+
+```text
+bootstrap
+update
+reconcile
+silver-build
+gold-build
+inventory
+run-daily
+```
+
+Global options such as `--lake-root`, `--today`, and `--overlap-days` precede the subcommand. `--series` follows commands that accept a series restriction.
+
+Examples:
+
+```bash
+# First explicit maximum-history load for selected series.
+uv run market-regime-loader \
+  --lake-root /srv/market-regime/lake \
+  bootstrap --series vix --series us_10y
+
+# Normal bounded source update only.
+uv run market-regime-loader \
+  --lake-root /srv/market-regime/lake \
+  update --series us_10y
+
+# Explicit operator reconciliation; never invoked by run-daily.
+uv run market-regime-loader \
+  --lake-root /srv/market-regime/lake \
+  reconcile --series us_10y
+
+# Full operational daily path.
+uv run market-regime-loader \
+  --lake-root /srv/market-regime/lake \
+  run-daily
+
+# Rebuild and print the local inventory.
+uv run market-regime-loader \
+  --lake-root /srv/market-regime/lake \
+  inventory --json
+```
+
+### Daily pipeline contract
+
+`run-daily` is deliberately **delta-only** for sources:
+
+```text
+recover interrupted Gold publication/root views
+        -> Bronze update (or bootstrap only when that series has no Bronze)
+        -> selected Silver rebuild
+        -> full canonical Gold from all 13 available Silver series
+        -> immutable bundle + physical validation
+        -> authoritative catalog promotion
+        -> root materialized-view refresh
+        -> Gold retention
+        -> inventory refresh
+```
+
+For existing Bronze the request window is always:
+
+```text
+max(Bronze.observation_date) - overlap_days .. injected today
+```
+
+With the default overlap this is seven calendar days. `run-daily` has no hidden call path to source `reconcile`, maximum-history loading, or the historical minimum. An explicit `--series` restricts Bronze/Silver work only; Gold remains a full canonical dataset and therefore requires all 13 Silver inputs to exist.
+
+### Runtime configuration
+
+Use a **persistent** lake path. A container-local ephemeral path would lose the incremental state and defeat delta planning.
+
+FRED-backed source commands require:
+
+```bash
+export FRED_API_KEY='...'
+```
+
+The key is runtime configuration only and is sanitized from structured CLI logs and persisted failure metadata.
+
+Gold-capable commands (`gold-build`, `run-daily`) record the source Git commit in each immutable build manifest. In a Git checkout the CLI resolves `git rev-parse HEAD`; packaged/deployed environments should set explicitly:
+
+```bash
+export MARKET_REGIME_GIT_COMMIT='<40-or-64-character-lowercase-hex-commit>'
+```
+
+The optional testing/debugging flag `--today YYYY-MM-DD` injects the planning date deterministically. Production scheduling normally omits it.
+
+### Scheduling
+
+The data lake is intended to run on the deployment host/NAS, not as scheduled GitHub Actions ingestion. A typical cron entry is:
+
+```cron
+15 2 * * * cd /srv/market-regime-loader && /usr/local/bin/uv run market-regime-loader --lake-root /srv/market-regime/lake run-daily >> /var/log/market-regime-loader.log 2>&1
+```
+
+Equivalent systemd service command:
+
+```text
+WorkingDirectory=/srv/market-regime-loader
+ExecStart=/usr/local/bin/uv run market-regime-loader --lake-root /srv/market-regime/lake run-daily
+```
+
+If periodic maximum-history reconciliation is desired, schedule it **separately** and less frequently, for example weekly:
+
+```cron
+30 3 * * 0 cd /srv/market-regime-loader && /usr/local/bin/uv run market-regime-loader --lake-root /srv/market-regime/lake reconcile >> /var/log/market-regime-reconcile.log 2>&1
+```
+
+Keeping these schedules separate makes the normal daily delta guarantee observable and testable.
+
 ## Quality Gates
 
 Required push and merge checks:
@@ -341,7 +460,7 @@ Live provider tests are marked `network` and are excluded from required gates.
 
 `main` is intended to be protected: no direct pushes, required pull request, required five checks, no force push/delete, squash merge, and repository auto-merge. Implementation PRs enable auto-merge so GitHub merges them only after all required merge-gate conditions pass.
 
-## Planned Repository Structure
+## Repository Structure
 
 ```text
 api/                 CLI adapters only

@@ -32,8 +32,12 @@ class SeriesRunResult:
     """Stable result returned by one isolated series execution."""
 
     series_id: str
+    provider: Provider
     run_id: str
     mode: OperationMode
+    request_start: date | None
+    request_end: date
+    maximum_history: bool
     inserted_rows: int
     revised_rows: int
     written_partitions: int
@@ -132,8 +136,12 @@ class BronzeOrchestrator:
             self._uow.commit_success(prepared, success_run, next_state)
             return SeriesRunResult(
                 series_id=series_id,
+                provider=contract.provider,
                 run_id=run_id,
                 mode=plan.mode,
+                request_start=requested_start,
+                request_end=plan.request_end,
+                maximum_history=plan.maximum_history,
                 inserted_rows=prepared.diff.inserts.height,
                 revised_rows=prepared.diff.revisions.height,
                 written_partitions=prepared.written_partitions,
