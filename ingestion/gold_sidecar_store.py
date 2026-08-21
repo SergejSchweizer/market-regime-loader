@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import tempfile
 from collections.abc import Callable
@@ -70,17 +71,79 @@ def feature_profile_data(frame: pl.DataFrame) -> tuple[tuple[str, ...], tuple[fl
 
 def _profile_png(frame: pl.DataFrame) -> bytes:
     features, coverage = feature_profile_data(frame)
-    figure = Figure(figsize=(16, 8), dpi=100)
+    timestamps = frame.get_column("timestamp_m1").to_list()
+    figure = Figure(figsize=(18, max(8, len(features) * 2.25)), dpi=100, facecolor="#080d19")
     canvas = FigureCanvasAgg(figure)
-    axis = figure.add_subplot(1, 1, 1)
-    positions = list(range(len(features)))
-    axis.bar(positions, coverage)
-    axis.set_ylim(0.0, 1.0)
-    axis.set_ylabel("non-null fraction")
-    axis.set_title("Gold feature profile")
-    axis.set_xticks(positions)
-    axis.set_xticklabels(features, rotation=90, fontsize=6)
-    figure.tight_layout()
+    axes = figure.subplots(
+        nrows=len(features), ncols=2, squeeze=False, gridspec_kw={"width_ratios": [4, 1]}
+    )
+    for index, (feature, fraction) in enumerate(zip(features, coverage, strict=True)):
+        series_axis, histogram_axis = axes[index]
+        values = frame.get_column(feature).to_list()
+        observed = [
+            (stamp, float(value))
+            for stamp, value in zip(timestamps, values, strict=True)
+            if value is not None
+        ]
+        for axis in (series_axis, histogram_axis):
+            axis.set_facecolor("#101827")
+            axis.grid(color="#26354f", alpha=0.45, linewidth=0.5)
+            axis.tick_params(colors="#b8c5d9", labelsize=6)
+            for spine in axis.spines.values():
+                spine.set_color("#31435f")
+        series_axis.set_ylabel(feature, color="#cdd7e6", fontsize=7)
+        if not observed:
+            series_axis.text(
+                0.02,
+                0.5,
+                f"feature: {feature}\nno data",
+                color="#dce5f2",
+                transform=series_axis.transAxes,
+                va="center",
+            )
+            histogram_axis.text(
+                0.5,
+                0.5,
+                "no data",
+                color="#dce5f2",
+                transform=histogram_axis.transAxes,
+                ha="center",
+                va="center",
+                fontsize=7,
+            )
+            continue
+        dates, numeric = zip(*observed, strict=True)
+        series_axis.plot(dates, numeric, color="#76c7e8", linewidth=0.8)
+        series_axis.axvspan(timestamps[0], dates[0], color="#7d2949", alpha=0.32)
+        summary = (
+            f"coverage: {fraction:.1%}\nn: {len(numeric)}\n"
+            f"mean: {sum(numeric) / len(numeric):.5g}\n"
+            f"min/max: {min(numeric):.5g} / {max(numeric):.5g}"
+        )
+        series_axis.text(
+            0.01,
+            0.96,
+            summary,
+            transform=series_axis.transAxes,
+            va="top",
+            color="#dce5f2",
+            fontsize=6,
+            bbox={"facecolor": "#0b1322", "edgecolor": "#31435f", "alpha": 0.85, "pad": 2},
+        )
+        bins = min(30, max(5, int(math.sqrt(len(numeric)))))
+        histogram_axis.hist(numeric, bins=bins, color="#b7c98a", edgecolor="#9aac75", linewidth=0.3)
+        histogram_axis.set_xlabel("value", color="#cdd7e6", fontsize=7)
+    figure.suptitle("Gold daily feature profile", color="#e8eef8", fontsize=16, fontweight="bold")
+    figure.text(
+        0.5,
+        0.985,
+        f"{frame.height:,} rows | {timestamps[0]:%Y-%m-%d} → {timestamps[-1]:%Y-%m-%d}",
+        color="#b8c5d9",
+        ha="center",
+        va="top",
+        fontsize=9,
+    )
+    figure.subplots_adjust(left=0.17, right=0.98, top=0.97, bottom=0.03, hspace=0.8, wspace=0.08)
     buffer = BytesIO()
     canvas.print_png(  # type: ignore[no-untyped-call]
         buffer,

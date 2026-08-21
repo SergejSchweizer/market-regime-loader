@@ -61,7 +61,7 @@ def _unquote(value: str) -> str:
 
 def _validate(text: str) -> list[BacklogPr]:
     sections = _sections(text)
-    expected = [f"PR-{index:02d}" for index in range(1, 30)]
+    expected = [f"PR-{index:02d}" for index in range(1, 31)]
     assert [section.pr_id for section in sections] == expected
 
     for section in sections:
@@ -106,7 +106,7 @@ def _validate(text: str) -> list[BacklogPr]:
 
 def test_backlog_has_exact_pr_metadata_contract() -> None:
     sections = _validate(BACKLOG.read_text(encoding="utf-8"))
-    assert len(sections) == 29
+    assert len(sections) == 30
 
 
 def _minimal_section() -> str:

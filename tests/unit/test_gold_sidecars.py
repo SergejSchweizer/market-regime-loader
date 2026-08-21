@@ -14,6 +14,7 @@ from application.gold_sidecars import (
     expected_manifest_keys,
     feature_set_sha256,
 )
+from ingestion.gold_sidecar_store import _profile_png
 
 START = datetime(2026, 8, 19, 2, tzinfo=UTC)
 GIT_SHA = "a" * 40
@@ -105,6 +106,12 @@ def test_git_identity_is_required_with_explicit_deterministic_test_fallback() ->
         plot_path="versions/build_id=20260819T020000Z/feature_profile.png",
     )
     assert manifest.git_commit_hash == "0" * 40
+
+
+def test_feature_profile_is_a_diagnostic_png_with_all_features() -> None:
+    png = _profile_png(_frame())
+    assert png.startswith(b"\x89PNG\r\n\x1a\n")
+    assert len(png) > 10_000
 
 
 def test_builder_rejects_wrong_frame_order_naive_time_and_reverse_completion() -> None:

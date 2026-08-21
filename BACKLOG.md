@@ -1349,6 +1349,36 @@ Acceptance:
 - A1 (verifies R1): exporter emits shell-safe required values.
 - A2 (verifies R2): missing settings fail safely and config is ignored by Git.
 
+## PR-30: Add Diagnostic Gold Feature Profile
+
+Status: In Progress
+
+Updated: 2026-08-21
+
+PR: none
+
+Git branch: `pr-30/diagnostic-gold-feature-profile`
+
+Git status: `active-clean`
+
+Agent lane: Gold presentation; one agent only
+
+Depends on: PR-20, PR-24
+
+Commit: `feat(pr-30): add diagnostic gold feature profile`
+
+Design patterns: Adapter, Materialized View.
+
+Description:
+- R1: Replace the coverage-only Gold PNG with a dark diagnostic sheet containing a time series, distribution, coverage, and summary statistics for every canonical feature.
+- R2: Preserve immutable sidecar semantics and render missing features explicitly without fabricating values.
+- R3: Test deterministic valid diagnostic PNG generation.
+
+Acceptance:
+- A1 (verifies R1): every feature has a time-series and histogram panel with summary context.
+- A2 (verifies R2): null-only features render as no-data panels.
+- A3 (verifies R3): PNG contract tests pass offline.
+
 ## Definition Of MVP Complete
 
 MVP is complete only when PR-01 through PR-24 are merged and:
