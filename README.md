@@ -417,11 +417,19 @@ The optional testing/debugging flag `--today YYYY-MM-DD` injects the planning da
 
 ### Scheduling
 
-The data lake is intended to run on the deployment host/NAS, not as scheduled GitHub Actions ingestion. A typical cron entry is:
+The data lake is intended to run on the deployment host/NAS, not as scheduled GitHub Actions ingestion. The checked-in crontab template schedules the delta-only update every **Saturday at 10:00 in the deployment host's local time zone**:
 
 ```cron
-15 2 * * * cd /srv/market-regime-loader && /usr/local/bin/uv run market-regime-loader --lake-root /srv/market-regime/lake run-daily >> /var/log/market-regime-loader.log 2>&1
+0 10 * * 6 cd /srv/market-regime-loader && /usr/local/bin/uv run market-regime-loader --lake-root /srv/market-regime/lake run-daily >> /var/log/market-regime-loader.log 2>&1
 ```
+
+Install it for the service account after reviewing the absolute paths for that host:
+
+```bash
+crontab ops/market-regime-loader.cron
+```
+
+The cron command is intentionally only `run-daily`, so it preserves the normal bounded delta-update contract and never performs an implicit source reconciliation.
 
 Equivalent systemd service command:
 
