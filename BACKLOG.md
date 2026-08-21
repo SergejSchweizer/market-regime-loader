@@ -1261,6 +1261,36 @@ Acceptance:
 - A2 (verifies R2): the Yahoo request has the stable User-Agent, all-null OHLC bars are ignored, partially missing bars fail, and exact update bounds remain unchanged.
 - A3 (verifies R3): provider tests and the complete offline quality gate pass.
 
+## PR-27: Parallelize Silver And Gold Polars Work
+
+Status: In Progress
+
+Updated: 2026-08-21
+
+PR: none
+
+Git branch: `pr-27/parallelize-polars-silver-gold`
+
+Git status: `active-clean`
+
+Agent lane: Performance; one agent only
+
+Depends on: PR-23, PR-24
+
+Commit: `perf(pr-27): parallelize silver and gold polars work`
+
+Design patterns: Strategy, Dependency Injection, Facade/Orchestrator.
+
+Description:
+- R1: Use an explicit injected execution policy sized from Polars' thread pool so independent Silver builds and reads run concurrently without exceeding Polars' available-core bound.
+- R2: Execute independent volatility and macro Gold feature families concurrently before deterministic canonical assembly.
+- R3: Test the all-core policy and retain deterministic result ordering and existing pipeline behavior.
+
+Acceptance:
+- A1 (verifies R1): default policy worker count equals `polars.thread_pool_size()` and its map preserves input order.
+- A2 (verifies R2): Gold feature-family calls use the execution policy before assembly.
+- A3 (verifies R3): offline quality gate passes.
+
 ## Definition Of MVP Complete
 
 MVP is complete only when PR-01 through PR-24 are merged and:
