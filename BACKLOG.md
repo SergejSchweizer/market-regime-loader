@@ -1321,6 +1321,34 @@ Acceptance:
 - A2 (verifies R2): rsync mirrors directory contents with archive, partial-transfer, and delayed-delete semantics.
 - A3 (verifies R3): configuration and offline tests are exact.
 
+## PR-29: Add Protected Operational YAML Configuration
+
+Status: In Progress
+
+Updated: 2026-08-21
+
+PR: none
+
+Git branch: `pr-29/operational-yaml-config`
+
+Git status: `active-clean`
+
+Agent lane: Operations; one agent only
+
+Depends on: PR-25, PR-28
+
+Commit: `feat(pr-29): add protected operational yaml config`
+
+Design patterns: Adapter, Command, Dependency Injection.
+
+Description:
+- R1: Export protected operational YAML settings as shell-safe cron environment assignments.
+- R2: Keep local `config.yaml` out of version control while validating required runtime settings.
+
+Acceptance:
+- A1 (verifies R1): exporter emits shell-safe required values.
+- A2 (verifies R2): missing settings fail safely and config is ignored by Git.
+
 ## Definition Of MVP Complete
 
 MVP is complete only when PR-01 through PR-24 are merged and:
