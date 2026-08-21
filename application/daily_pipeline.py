@@ -15,6 +15,7 @@ from application.gold_frame import GoldFrameBuild, assemble_gold_frame
 from application.gold_publication import GoldPublisher
 from application.gold_retention import GoldRetentionResult, GoldRetentionService
 from application.macro_features import MACRO_SERIES, build_macro_features
+from application.parallelism import PolarsExecutionPolicy
 from application.planner import OperationMode
 from application.volatility_features import VOLATILITY_SERIES, build_volatility_features
 
@@ -73,6 +74,7 @@ class DailyMedallionPipeline:
         inventory: InventoryRefreshPort,
         run_id_factory: RunIdFactory | None = None,
         event_sink: EventSink | None = None,
+        polars_execution: PolarsExecutionPolicy | None = None,
     ) -> None:
         self._series_registry = series_registry
         self._bronze = bronze
@@ -82,6 +84,11 @@ class DailyMedallionPipeline:
         self._inventory = inventory
         self._run_id_factory = run_id_factory if run_id_factory is not None else _default_run_id
         self._event_sink = event_sink if event_sink is not None else _no_event
+        self._polars_execution = (
+            polars_execution
+            if polars_execution is not None
+            else PolarsExecutionPolicy.all_available_cores()
+        )
 
     def bootstrap(self, series_ids: Sequence[str], *, today: date) -> PipelineCommandResult:
         return self._source_command("bootstrap", series_ids, OperationMode.BOOTSTRAP, today=today)
@@ -268,28 +275,34 @@ class DailyMedallionPipeline:
         command: str = "silver-build",
     ) -> None:
         self._event(run_id, command, stage="silver", status="started")
-        for series_id in selected:
-            self._silver.build(self._series_registry[series_id])
+        self._polars_execution.map(
+            lambda series_id: self._silver.build(self._series_registry[series_id]), selected
+        )
         self._event(run_id, command, stage="silver", status="success")
 
     def _canonical_gold(self, *, run_id: str, command: str) -> GoldFrameBuild:
         self._event(run_id, command, stage="gold-frame", status="started")
-        silver_by_series = {
-            series_id: self._silver.read(contract)
-            for series_id, contract in self._series_registry.items()
-        }
+        series_items = tuple(self._series_registry.items())
+        silver_by_series = dict(
+            self._polars_execution.map(
+                lambda item: (item[0], self._silver.read(item[1])), series_items
+            )
+        )
         missing = [series_id for series_id, frame in silver_by_series.items() if frame.is_empty()]
         if missing:
             raise ValueError(
                 "full Gold requires non-empty Silver for every canonical series; missing: "
                 + ", ".join(missing)
             )
-        volatility = build_volatility_features(
-            {series_id: silver_by_series[series_id] for series_id in VOLATILITY_SERIES}
+        feature_builders: tuple[Callable[[], pl.DataFrame], Callable[[], pl.DataFrame]] = (
+            lambda: build_volatility_features(
+                {series_id: silver_by_series[series_id] for series_id in VOLATILITY_SERIES}
+            ),
+            lambda: build_macro_features(
+                {series_id: silver_by_series[series_id] for series_id in MACRO_SERIES}
+            ),
         )
-        macro = build_macro_features(
-            {series_id: silver_by_series[series_id] for series_id in MACRO_SERIES}
-        )
+        volatility, macro = self._polars_execution.map(lambda build: build(), feature_builders)
         result = assemble_gold_frame(volatility, macro, silver_by_series)
         self._event(
             run_id,

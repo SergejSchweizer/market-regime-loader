@@ -11,6 +11,7 @@ from application.daily_pipeline import DailyMedallionPipeline, ProviderBatchErro
 from application.gold_catalog import GoldBuildStatus, GoldCatalogRecord
 from application.gold_frame import GOLD_COLUMNS, GOLD_SOURCE_SERIES
 from application.gold_retention import GoldRetentionResult
+from application.parallelism import PolarsExecutionPolicy
 from application.planner import OperationMode
 from application.registry import SERIES_REGISTRY
 from application.silver import SILVER_SCHEMA
@@ -177,6 +178,7 @@ def _pipeline(
         inventory=actual_inventory,
         run_id_factory=lambda command: f"run-{command}",
         event_sink=None if events is None else events.append,
+        polars_execution=PolarsExecutionPolicy(1),
     )
     return (
         pipeline,
