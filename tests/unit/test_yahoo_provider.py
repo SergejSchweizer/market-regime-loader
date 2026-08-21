@@ -41,6 +41,14 @@ def payload(days: list[date], closes: list[float | None] | None = None) -> bytes
     ).encode()
 
 
+def payload_with_all_null_bar(days: list[date]) -> bytes:
+    document = json.loads(payload(days))
+    quote = document["chart"]["result"][0]["indicators"]["quote"][0]
+    for name in ("open", "high", "low", "close"):
+        quote[name][-1] = None
+    return json.dumps(document).encode()
+
+
 class FakeTransport:
     def __init__(self, response: HttpResponse) -> None:
         self.response = response
@@ -98,6 +106,17 @@ def test_empty_bounded_response_is_valid_noop() -> None:
         "low",
         "close",
     ]
+
+
+def test_all_null_ohlc_bar_is_ignored_without_fabricating_an_observation() -> None:
+    provider = YahooMoveProvider(
+        FakeTransport(HttpResponse(200, payload_with_all_null_bar([START, END]), {})),
+        clock=lambda: NOW,
+    )
+
+    frame = provider.fetch(series_contract("move"), update_request())
+
+    assert frame.get_column("observation_date").to_list() == [START]
 
 
 def test_out_of_window_bounded_row_is_contract_failure() -> None:

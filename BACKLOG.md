@@ -1253,12 +1253,12 @@ Design patterns: Adapter, Strategy, Dependency Injection.
 
 Description:
 - R1: Adapt the STOXX VSTOXX parser to accept the provider's current `Indexvalue` value-column spelling without weakening schema, numeric, or duplicate validation.
-- R2: Supply Yahoo's chart endpoint with a stable client User-Agent so the registered MOVE adapter can access the documented source while preserving its existing bounded-request and retry policy behavior.
+- R2: Supply Yahoo's chart endpoint with a stable client User-Agent and ignore only all-null OHLC bars, so the registered MOVE adapter can access its live source without fabricating observations while preserving bounded-request and retry behavior.
 - R3: Add offline regression coverage for both live-source compatibility cases and retain the backlog metadata contract.
 
 Acceptance:
 - A1 (verifies R1): a semicolon-delimited `Date;Symbol;Indexvalue` V2TX fixture parses to the expected scalar observations.
-- A2 (verifies R2): the Yahoo request has the stable User-Agent while exact update bounds remain unchanged.
+- A2 (verifies R2): the Yahoo request has the stable User-Agent, all-null OHLC bars are ignored, partially missing bars fail, and exact update bounds remain unchanged.
 - A3 (verifies R3): provider tests and the complete offline quality gate pass.
 
 ## Definition Of MVP Complete

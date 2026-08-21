@@ -126,6 +126,8 @@ class YahooMoveProvider:
         rows: list[dict[str, object]] = []
         for index, timestamp in enumerate(timestamps):
             values = {name: vectors[name][index] for name in vectors}
+            if all(value is None for value in values.values()):
+                continue
             if values["close"] is None:
                 raise ValueError("Yahoo payload contains missing close")
             numeric: dict[str, float] = {}
