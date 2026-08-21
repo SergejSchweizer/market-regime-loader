@@ -457,7 +457,7 @@ Acceptance:
 
 ## PR-04: Add Shared HTTP Port, Retry Strategy, And Provider Protocol
 
-Status: In Progress
+Status: Merged
 
 Updated: 2026-08-19
 
@@ -465,7 +465,7 @@ PR: #5
 
 Git branch: `pr-04/shared-http-provider-port`
 
-Git status: `pushed-ci-failing`
+Git status: `merged`
 
 Agent lane: Agent B
 
@@ -491,7 +491,7 @@ Acceptance:
 
 ## PR-05: Implement Bootstrap, Strict Delta Update, Explicit Reconcile Planner And State
 
-Status: In Progress
+Status: Merged
 
 Updated: 2026-08-19
 
@@ -499,7 +499,7 @@ PR: #8
 
 Git branch: `pr-05/planner-delta-reconcile-state`
 
-Git status: `pushed-ci-failing`
+Git status: `merged`
 
 Agent lane: Foundation; first free agent
 
@@ -527,15 +527,15 @@ Acceptance:
 
 ## PR-06: Add CBOE Volatility Provider
 
-Status: Planned
+Status: Merged
 
 Updated: 2026-08-19
 
-PR: none
+PR: #10
 
 Git branch: `pr-06/cboe-volatility-provider`
 
-Git status: `not-started (branch absent)`
+Git status: `merged`
 
 Agent lane: Agent A
 
@@ -561,15 +561,15 @@ Acceptance:
 
 ## PR-07: Add STOXX VSTOXX Provider
 
-Status: Planned
+Status: Merged
 
 Updated: 2026-08-19
 
-PR: none
+PR: #11
 
 Git branch: `pr-07/stoxx-vstoxx-provider`
 
-Git status: `not-started (branch absent)`
+Git status: `merged`
 
 Agent lane: Agent A
 
@@ -595,15 +595,15 @@ Acceptance:
 
 ## PR-08: Add Yahoo MOVE Provider
 
-Status: Planned
+Status: Merged
 
 Updated: 2026-08-19
 
-PR: none
+PR: #12
 
 Git branch: `pr-08/yahoo-move-provider`
 
-Git status: `not-started (branch absent)`
+Git status: `merged`
 
 Agent lane: Agent A
 
@@ -629,15 +629,15 @@ Acceptance:
 
 ## PR-09: Add ECB CISS And ESTR Provider
 
-Status: Planned
+Status: Merged
 
 Updated: 2026-08-19
 
-PR: none
+PR: #13
 
 Git branch: `pr-09/ecb-ciss-estr-provider`
 
-Git status: `not-started (branch absent)`
+Git status: `merged`
 
 Agent lane: Agent B
 
@@ -663,15 +663,15 @@ Acceptance:
 
 ## PR-10: Add FRED Rates, Credit, And Dollar Provider
 
-Status: Planned
+Status: Merged
 
 Updated: 2026-08-19
 
-PR: none
+PR: #14
 
 Git branch: `pr-10/fred-rates-credit-dollar-provider`
 
-Git status: `not-started (branch absent)`
+Git status: `merged`
 
 Agent lane: Agent B
 
@@ -699,7 +699,7 @@ Acceptance:
 
 ## PR-11: Add Operational Manifest And Inventory Repositories
 
-Status: In Progress
+Status: Merged
 
 Updated: 2026-08-19
 
@@ -707,7 +707,7 @@ PR: #7
 
 Git branch: `pr-11/bronze-inventory-run-manifests`
 
-Git status: `pushed-ci-failing`
+Git status: `merged`
 
 Agent lane: Agent B
 
@@ -733,15 +733,15 @@ Acceptance:
 
 ## PR-12: Add Registry-Driven Bronze Orchestration Unit Of Work
 
-Status: Planned
+Status: Merged
 
 Updated: 2026-08-19
 
-PR: none
+PR: #15
 
 Git branch: `pr-12/bronze-orchestration`
 
-Git status: `not-started (branch absent)`
+Git status: `merged`
 
 Agent lane: Integration; one agent only
 
@@ -769,15 +769,15 @@ Acceptance:
 
 ## PR-13: Build Canonical Silver Daily Series
 
-Status: Planned
+Status: Merged
 
 Updated: 2026-08-19
 
-PR: none
+PR: #16
 
 Git branch: `pr-13/silver-canonical-series`
 
-Git status: `not-started (branch absent)`
+Git status: `merged`
 
 Agent lane: Agent A
 
@@ -803,15 +803,15 @@ Acceptance:
 
 ## PR-14: Add Lake Inventory CLI
 
-Status: Planned
+Status: Merged
 
 Updated: 2026-08-19
 
-PR: none
+PR: #17
 
 Git branch: `pr-14/lake-inventory-cli`
 
-Git status: `not-started (branch absent)`
+Git status: `merged`
 
 Agent lane: Agent B
 
@@ -837,15 +837,15 @@ Acceptance:
 
 ## PR-15: Build Volatility Gold Feature Family
 
-Status: Planned
+Status: Merged
 
 Updated: 2026-08-19
 
-PR: none
+PR: #18
 
 Git branch: `pr-15/volatility-gold-features`
 
-Git status: `not-started (branch absent)`
+Git status: `merged`
 
 Agent lane: Agent A
 
@@ -873,15 +873,15 @@ Acceptance:
 
 ## PR-16: Build Macro/Credit/Rates/USD Gold Feature Family
 
-Status: Planned
+Status: Merged
 
 Updated: 2026-08-19
 
-PR: none
+PR: #19
 
 Git branch: `pr-16/macro-gold-features`
 
-Git status: `not-started (branch absent)`
+Git status: `merged`
 
 Agent lane: Agent B
 
@@ -909,15 +909,15 @@ Acceptance:
 
 ## PR-17: Assemble And Validate Canonical Gold Frame
 
-Status: Planned
+Status: Merged
 
 Updated: 2026-08-19
 
-PR: none
+PR: #20
 
-Git branch: `pr-17/canonical-daily-gold-frame`
+Git branch: `pr-17/canonical-gold-frame`
 
-Git status: `not-started (branch absent)`
+Git status: `merged`
 
 Agent lane: Integration; one agent only
 
@@ -945,15 +945,15 @@ Acceptance:
 
 ## PR-18: Add Immutable Gold Build Store Repository
 
-Status: Planned
+Status: Merged
 
 Updated: 2026-08-19
 
-PR: none
+PR: #21
 
-Git branch: `pr-18/immutable-gold-storage`
+Git branch: `pr-18/versioned-gold-storage`
 
-Git status: `not-started (branch absent)`
+Git status: `merged`
 
 Agent lane: Agent A
 
@@ -981,15 +981,15 @@ Acceptance:
 
 ## PR-19: Add Gold Catalog Repository And Resolution Strategies
 
-Status: Planned
+Status: Merged
 
 Updated: 2026-08-19
 
-PR: none
+PR: #22
 
-Git branch: `pr-19/gold-catalog-resolution`
+Git branch: `pr-19/gold-catalog-contract`
 
-Git status: `not-started (branch absent)`
+Git status: `merged`
 
 Agent lane: Agent B
 
@@ -1017,15 +1017,15 @@ Acceptance:
 
 ## PR-20: Generate Immutable Build Manifest And Feature Profile
 
-Status: Planned
+Status: Merged
 
 Updated: 2026-08-19
 
-PR: none
+PR: #23
 
 Git branch: `pr-20/gold-build-sidecars`
 
-Git status: `not-started (branch absent)`
+Git status: `merged`
 
 Agent lane: Agent A
 
@@ -1053,15 +1053,15 @@ Acceptance:
 
 ## PR-21: Publish Gold With State Machine, Unit Of Work, And Materialized Views
 
-Status: Planned
+Status: Merged
 
 Updated: 2026-08-19
 
-PR: none
+PR: #24
 
 Git branch: `pr-21/gold-publication-state-machine`
 
-Git status: `not-started (branch absent)`
+Git status: `merged`
 
 Agent lane: Integration; one agent only
 
@@ -1091,15 +1091,15 @@ Acceptance:
 
 ## PR-22: Add Safe Gold Retention With Mark-And-Sweep
 
-Status: Planned
+Status: Merged
 
 Updated: 2026-08-19
 
-PR: none
+PR: #25
 
 Git branch: `pr-22/gold-build-retention`
 
-Git status: `not-started (branch absent)`
+Git status: `merged`
 
 Agent lane: Foundation; first free agent
 
@@ -1127,15 +1127,15 @@ Acceptance:
 
 ## PR-23: Add Delta-Only Daily Medallion Pipeline And Operational CLI
 
-Status: Planned
+Status: Merged
 
 Updated: 2026-08-19
 
-PR: none
+PR: #26
 
 Git branch: `pr-23/daily-medallion-pipeline`
 
-Git status: `not-started (branch absent)`
+Git status: `merged`
 
 Agent lane: Integration; one agent only
 
@@ -1169,15 +1169,15 @@ Acceptance:
 
 ## PR-24: Enforce Backlog Git Metadata And Design-Pattern Governance
 
-Status: In Progress
+Status: Merged
 
 Updated: 2026-08-19
 
-PR: pending
+PR: #9
 
 Git branch: `pr-24/backlog-governance-contracts`
 
-Git status: `active-clean`
+Git status: `merged`
 
 Agent lane: Governance; one agent only
 
@@ -1195,7 +1195,7 @@ Description:
 - R5: Keep `AGENTS.md` synchronized with the executable contract and require exact backlog branch plus PR-scoped Conventional Commits before commit/push.
 
 Acceptance:
-- A1 (verifies R1): PR-01/#2, PR-02/#3, PR-03/#4 are `Merged/merged`; PR-04/#5, PR-05/#8, PR-11/#7 reflect their open pushed state; all planned PRs retain exact declared branches.
+- A1 (verifies R1): every PR-01..PR-24 entry records its verified merged GitHub PR number, exact head branch, and `Merged/merged` delivery state.
 - A2 (verifies R2): every PR-01..PR-24 section contains one non-empty `Design patterns` field and the docs explicitly forbid pattern-for-pattern's-sake implementation.
 - A3 (verifies R3): allowed status tests accept `pushed-ci-failing`, reject unknown states, and reserve `pushed-ci-green` for all-green required remote gates.
 - A4 (verifies R4): parser proves exactly 24 PR sections and all metadata contracts; negative fixtures for missing branch/status/pattern and PR-ID/commit mismatch fail deterministically.
