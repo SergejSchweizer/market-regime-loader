@@ -1201,6 +1201,36 @@ Acceptance:
 - A4 (verifies R4): parser proves exactly 24 PR sections and all metadata contracts; negative fixtures for missing branch/status/pattern and PR-ID/commit mismatch fail deterministically.
 - A5 (verifies R5): AGENTS and BACKLOG state the same branch/commit/status/pattern rules without contradiction.
 
+## PR-25: Add Saturday Daily Update Cron Template
+
+Status: In Progress
+
+Updated: 2026-08-21
+
+PR: none
+
+Git branch: `pr-25/saturday-daily-update-cron`
+
+Git status: `active-clean`
+
+Agent lane: Operations; one agent only
+
+Depends on: PR-23, PR-24
+
+Commit: `feat(pr-25): add saturday daily update cron template`
+
+Design patterns: Command; Architectural baseline only for declarative host scheduling.
+
+Description:
+- R1: Provide a versioned, installable host-crontab template that invokes only the existing `run-daily` command on Saturday at 10:00 local deployment-host time; it must use a persistent lake path and append logs.
+- R2: Document installation, the exact schedule, host-local-time assumption, and the fact that the scheduled command remains delta-only and does not schedule source reconciliation.
+- R3: Add offline regression coverage that guards the cron expression, command, persistent lake path, and absence of a scheduled GitHub Actions ingestion workflow.
+
+Acceptance:
+- A1 (verifies R1): the template has exactly `0 10 * * 6`, invokes `run-daily`, uses `/srv/market-regime/lake`, and redirects stdout/stderr to the operational log.
+- A2 (verifies R2): README gives the install command and confirms Saturday 10:00 host-local execution with no implicit source reconciliation.
+- A3 (verifies R3): offline tests validate the template and retain the no-scheduled-CI policy.
+
 ## Definition Of MVP Complete
 
 MVP is complete only when PR-01 through PR-24 are merged and:

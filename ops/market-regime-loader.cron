@@ -1,0 +1,3 @@
+# Install with: crontab ops/market-regime-loader.cron
+# The deployment host's local time zone determines when this runs.
+0 10 * * 6 cd /srv/market-regime-loader && /usr/local/bin/uv run market-regime-loader --lake-root /srv/market-regime/lake run-daily >> /var/log/market-regime-loader.log 2>&1
