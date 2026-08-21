@@ -107,7 +107,7 @@ class StoxxProvider:
         value_column = next(
             (
                 candidate
-                for candidate in ("V2TX", "OBS_VALUE", "VALUE", "CLOSE")
+                for candidate in ("V2TX", "OBS_VALUE", "VALUE", "INDEXVALUE", "CLOSE")
                 if candidate in raw.columns
             ),
             None,

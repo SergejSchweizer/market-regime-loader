@@ -13,6 +13,7 @@ from ingestion.stoxx_provider import StoxxProvider
 
 NOW = datetime(2026, 8, 19, 2, tzinfo=UTC)
 PAYLOAD = b"DATE;V2TX\n2026-08-10;18.0\n2026-08-11;19.0\n2026-08-19;20.0\n"
+LIVE_PAYLOAD = b"Date;Symbol;Indexvalue\n2026-08-10;V2TX;18.0\n2026-08-19;V2TX;20.0\n"
 
 
 class FakeTransport:
@@ -57,6 +58,15 @@ def test_bootstrap_and_reconcile_accept_full_history() -> None:
     provider = StoxxProvider(FakeTransport(HttpResponse(200, PAYLOAD, {})), clock=lambda: NOW)
     assert provider.fetch(series_contract("vstoxx"), request("bootstrap")).height == 3
     assert provider.fetch(series_contract("vstoxx"), request("reconcile")).height == 3
+
+
+def test_live_stoxx_indexvalue_column_is_accepted() -> None:
+    provider = StoxxProvider(FakeTransport(HttpResponse(200, LIVE_PAYLOAD, {})), clock=lambda: NOW)
+
+    frame = provider.fetch(series_contract("vstoxx"), request("bootstrap"))
+
+    assert frame.get_column("observation_date").to_list() == [date(2026, 8, 10), date(2026, 8, 19)]
+    assert frame.get_column("value").to_list() == [18.0, 20.0]
 
 
 def test_only_registered_vstoxx_contract_is_accepted() -> None:
