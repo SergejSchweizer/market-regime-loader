@@ -31,6 +31,7 @@ from ingestion.fred_provider import FredProvider
 from ingestion.gold_build_store import GoldBuildStore
 from ingestion.gold_catalog_repository import GoldCatalogRepository
 from ingestion.gold_materialized_views import GoldMaterializedViewWriter
+from ingestion.gold_mirror import RsyncGoldMirror
 from ingestion.gold_publication_adapters import GoldBundleAdapter
 from ingestion.gold_retention_store import GoldBundleSweeper
 from ingestion.gold_sidecar_store import GoldSidecarStore
@@ -191,7 +192,9 @@ def build_runtime(
     bundle = GoldBundleAdapter(paths, build_store, sidecar_store)
     catalog = GoldCatalogRepository(paths.gold_manifest_parquet())
     views = GoldMaterializedViewWriter(paths)
-    publisher = GoldPublisher(catalog, bundle, views)
+    mirror_root = os.environ.get("MARKET_REGIME_GOLD_MIRROR_ROOT", "").strip()
+    mirror = RsyncGoldMirror(paths.root / "gold", Path(mirror_root)) if mirror_root else None
+    publisher = GoldPublisher(catalog, bundle, views, mirror=mirror)
     retention = GoldRetentionService(catalog, GoldBundleSweeper(paths), views)
     event_sink = JsonEventSink(_logger(stderr), secrets=(fred_api_key,))
     pipeline = DailyMedallionPipeline(
