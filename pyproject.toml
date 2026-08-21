@@ -27,6 +27,7 @@ dev = [
   "coverage>=7.10",
   "ruff>=0.12",
   "mypy>=1.17",
+  "types-PyYAML>=6.0",
 ]
 
 [tool.setuptools.packages.find]
