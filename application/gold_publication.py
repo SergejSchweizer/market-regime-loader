@@ -69,6 +69,10 @@ class GoldMaterializedViewPort(Protocol):
     def refresh(self, records: Sequence[GoldCatalogRecord]) -> None: ...
 
 
+class GoldMirrorPort(Protocol):
+    def sync(self) -> None: ...
+
+
 @dataclass(slots=True)
 class GoldPublisher:
     """State Machine whose catalog replacement is the sole publication commit point."""
@@ -76,6 +80,7 @@ class GoldPublisher:
     catalog: GoldCatalogPort
     bundle: GoldBundlePort
     views: GoldMaterializedViewPort
+    mirror: GoldMirrorPort | None = None
     clock: Clock = _system_utc_now
     event_sink: EventSink = _no_event
 
@@ -164,6 +169,9 @@ class GoldPublisher:
         except BaseException:
             self.event_sink("views:promoted-failed")
             raise
+        if self.mirror is not None:
+            self.mirror.sync()
+            self.event_sink("mirror:synchronized")
         return current
 
     def _promoted_records(

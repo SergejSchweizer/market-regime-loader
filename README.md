@@ -415,6 +415,14 @@ export MARKET_REGIME_GIT_COMMIT='<40-or-64-character-lowercase-hex-commit>'
 
 The optional testing/debugging flag `--today YYYY-MM-DD` injects the planning date deterministically. Production scheduling normally omits it.
 
+To mirror every successfully published Gold dataset to another mounted volume, set:
+
+```bash
+export MARKET_REGIME_GOLD_MIRROR_ROOT=/volume1/Temp/gold
+```
+
+The mirror uses `rsync -aH --delete-delay --partial` only after catalog promotion and root-view refresh. A mirror failure does not roll back the authoritative Gold catalog; the next publication retries it.
+
 ### Scheduling
 
 The data lake is intended to run on the deployment host/NAS, not as scheduled GitHub Actions ingestion. The checked-in crontab template schedules the delta-only update every **Saturday at 10:00 in the deployment host's local time zone**:

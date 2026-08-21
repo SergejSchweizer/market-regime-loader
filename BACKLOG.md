@@ -1291,6 +1291,36 @@ Acceptance:
 - A2 (verifies R2): Gold feature-family calls use the execution policy before assembly.
 - A3 (verifies R3): offline quality gate passes.
 
+## PR-28: Add Post-Publication Gold Mirror
+
+Status: In Progress
+
+Updated: 2026-08-21
+
+PR: none
+
+Git branch: `pr-28/gold-publication-mirror`
+
+Git status: `active-clean`
+
+Agent lane: Operations; one agent only
+
+Depends on: PR-21, PR-24
+
+Commit: `feat(pr-28): add post-publication gold mirror`
+
+Design patterns: Adapter, Repository, State Machine, Dependency Injection.
+
+Description:
+- R1: After the authoritative catalog promotion and root-view refresh succeed, optionally mirror the complete Gold directory through an injected adapter.
+- R2: Configure the rsync destination through `MARKET_REGIME_GOLD_MIRROR_ROOT`; mirroring failure must not roll back an already-complete catalog row.
+- R3: Document the configured host mirror and test the exact rsync semantics.
+
+Acceptance:
+- A1 (verifies R1): mirror runs only after catalog promotion and materialized-view refresh.
+- A2 (verifies R2): rsync mirrors directory contents with archive, partial-transfer, and delayed-delete semantics.
+- A3 (verifies R3): configuration and offline tests are exact.
+
 ## Definition Of MVP Complete
 
 MVP is complete only when PR-01 through PR-24 are merged and:
