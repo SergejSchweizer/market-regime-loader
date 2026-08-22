@@ -25,11 +25,7 @@ def _epoch_microseconds(value: datetime) -> int:
     if value.tzinfo is None:
         raise ValueError("Gold timestamp_m1 must be timezone-aware")
     delta = value.astimezone(UTC) - _EPOCH
-    return (
-        delta.days * 86_400 * 1_000_000
-        + delta.seconds * 1_000_000
-        + delta.microseconds
-    )
+    return delta.days * 86_400 * 1_000_000 + delta.seconds * 1_000_000 + delta.microseconds
 
 
 def _canonical_float(value: float) -> float:
