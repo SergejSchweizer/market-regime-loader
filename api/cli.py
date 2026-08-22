@@ -9,7 +9,7 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import TextIO
 
@@ -23,6 +23,7 @@ from application.gold_sidecars import GoldSidecarBuilder
 from application.paths import LakePaths
 from application.planner import PlannerConfig
 from application.ports.market_data import MarketDataProvider
+from application.postgres_sync_service import GoldPostgresDeltaSync
 from application.registry import SERIES_REGISTRY
 from ingestion.bronze_uow import FilesystemBronzeUnitOfWork
 from ingestion.cboe_provider import CboeProvider
@@ -35,9 +36,11 @@ from ingestion.gold_mirror import RsyncGoldMirror
 from ingestion.gold_publication_adapters import GoldBundleAdapter
 from ingestion.gold_retention_store import GoldBundleSweeper
 from ingestion.gold_sidecar_store import GoldSidecarStore
+from ingestion.gold_sync_source import FilesystemGoldFrameSource
 from ingestion.httpx_adapter import HttpxTransport
 from ingestion.inventory_refresh import InventoryRefreshService
 from ingestion.operational_repository import read_inventory
+from ingestion.postgres_gold_repository import PostgresGoldSyncRepository, PostgresSyncConfig
 from ingestion.silver_repository import SilverSeriesRepository
 from ingestion.stoxx_provider import StoxxProvider
 from ingestion.yahoo_provider import YahooMoveProvider
@@ -48,6 +51,7 @@ EXIT_PROVIDER = 10
 EXIT_PIPELINE = 20
 _SOURCE_COMMANDS = frozenset({"bootstrap", "update", "reconcile", "run-daily"})
 _GOLD_COMMANDS = frozenset({"gold-build", "run-daily"})
+_POSTGRES_SYNC_COMMAND = "gold-sync-postgres"
 _UNUSED_GIT_IDENTITY = "0" * 40
 
 
@@ -85,6 +89,12 @@ class Runtime:
         self.transport.close()
 
 
+@dataclass(frozen=True, slots=True)
+class PostgresSyncRuntime:
+    sync: GoldPostgresDeltaSync
+    event_sink: JsonEventSink
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="market-regime-loader")
     parser.add_argument("--lake-root", type=Path, default=Path("lake"))
@@ -95,6 +105,7 @@ def build_parser() -> argparse.ArgumentParser:
         child = subparsers.add_parser(command)
         child.add_argument("--series", action="append", default=[])
     subparsers.add_parser("gold-build")
+    subparsers.add_parser(_POSTGRES_SYNC_COMMAND)
     inventory = subparsers.add_parser("inventory")
     inventory.add_argument("--json", action="store_true", dest="as_json")
     inventory.add_argument("--series", action="append", default=[])
@@ -134,6 +145,13 @@ def _logger(stderr: TextIO) -> logging.Logger:
     handler.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(handler)
     return logger
+
+
+def _runtime_secrets() -> tuple[str, ...]:
+    return (
+        os.environ.get("FRED_API_KEY", ""),
+        os.environ.get("PGPASSWORD", ""),
+    )
 
 
 def _required_provider_ids(command: str, series_ids: tuple[str, ...]) -> set[Provider]:
@@ -196,7 +214,7 @@ def build_runtime(
     mirror = RsyncGoldMirror(paths.root / "gold", Path(mirror_root)) if mirror_root else None
     publisher = GoldPublisher(catalog, bundle, views, mirror=mirror)
     retention = GoldRetentionService(catalog, GoldBundleSweeper(paths), views)
-    event_sink = JsonEventSink(_logger(stderr), secrets=(fred_api_key,))
+    event_sink = JsonEventSink(_logger(stderr), secrets=_runtime_secrets())
     pipeline = DailyMedallionPipeline(
         series_registry=SERIES_REGISTRY,
         bronze=bronze,
@@ -207,6 +225,24 @@ def build_runtime(
         event_sink=event_sink,
     )
     return Runtime(pipeline=pipeline, transport=transport, paths=paths)
+
+
+def build_postgres_sync_runtime(*, lake_root: Path, stderr: TextIO) -> PostgresSyncRuntime:
+    """Compose the read-local/write-PostgreSQL command without provider pipeline construction."""
+    config = PostgresSyncConfig.from_env()
+    paths = LakePaths(lake_root)
+    build_store = GoldBuildStore(paths)
+    source = FilesystemGoldFrameSource(paths, build_store)
+    catalog = GoldCatalogRepository(paths.gold_manifest_parquet())
+    repository = PostgresGoldSyncRepository(config)
+    event_sink = JsonEventSink(_logger(stderr), secrets=(config.password,))
+    sync = GoldPostgresDeltaSync(
+        catalog=catalog,
+        source=source,
+        repository=repository,
+        clock=lambda: datetime.now(UTC),
+    )
+    return PostgresSyncRuntime(sync=sync, event_sink=event_sink)
 
 
 def _dispatch(
@@ -248,6 +284,47 @@ def _dispatch(
     return EXIT_SUCCESS
 
 
+def _dispatch_postgres_sync(runtime: PostgresSyncRuntime) -> int:
+    result = runtime.sync.sync()
+    runtime.event_sink(
+        {
+            "command": _POSTGRES_SYNC_COMMAND,
+            "stage": "postgres_sync",
+            "status": "success",
+            "dataset_id": result.dataset_id,
+            "source_build_id": result.source_build_id,
+            "inserted": result.inserted,
+            "updated": result.updated,
+            "deleted": result.deleted,
+            "unchanged": result.unchanged,
+        }
+    )
+    return EXIT_SUCCESS
+
+
+def _failure_event(
+    stderr: TextIO,
+    *,
+    command: str,
+    stage: str,
+    error: Exception,
+    exit_code: int,
+    extra: dict[str, object] | None = None,
+) -> None:
+    event: dict[str, object] = {
+        "command": command,
+        "stage": stage,
+        "status": "failed",
+        "failure_category": stage,
+        "error_type": type(error).__name__,
+        "error": str(error),
+        "exit_code": exit_code,
+    }
+    if extra:
+        event.update(extra)
+    JsonEventSink(_logger(stderr), secrets=_runtime_secrets())(event)
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -263,51 +340,47 @@ def main(
         code = exc.code
         return code if isinstance(code, int) else EXIT_INPUT
 
+    command = str(args.command)
     series = tuple(getattr(args, "series", []))
     runtime: Runtime | None = None
     try:
+        if command == _POSTGRES_SYNC_COMMAND:
+            postgres_runtime = build_postgres_sync_runtime(lake_root=args.lake_root, stderr=error)
+            return _dispatch_postgres_sync(postgres_runtime)
         runtime = build_runtime(
             lake_root=args.lake_root,
-            command=str(args.command),
+            command=command,
             series_ids=series,
             overlap_days=args.overlap_days,
             stderr=error,
         )
         return _dispatch(runtime, args, stdout=output)
     except ProviderBatchError as exc:
-        JsonEventSink(_logger(error), secrets=(os.environ.get("FRED_API_KEY", ""),))(
-            {
-                "command": str(args.command),
-                "stage": "command",
-                "status": "failed",
-                "error_type": type(exc).__name__,
-                "failed_series": list(exc.failures),
-                "exit_code": EXIT_PROVIDER,
-            }
+        _failure_event(
+            error,
+            command=command,
+            stage="command",
+            error=exc,
+            exit_code=EXIT_PROVIDER,
+            extra={"failed_series": list(exc.failures)},
         )
         return EXIT_PROVIDER
     except ValueError as exc:
-        JsonEventSink(_logger(error), secrets=(os.environ.get("FRED_API_KEY", ""),))(
-            {
-                "command": str(args.command),
-                "stage": "configuration",
-                "status": "failed",
-                "error_type": type(exc).__name__,
-                "error": str(exc),
-                "exit_code": EXIT_INPUT,
-            }
+        _failure_event(
+            error,
+            command=command,
+            stage="configuration",
+            error=exc,
+            exit_code=EXIT_INPUT,
         )
         return EXIT_INPUT
     except Exception as exc:
-        JsonEventSink(_logger(error), secrets=(os.environ.get("FRED_API_KEY", ""),))(
-            {
-                "command": str(args.command),
-                "stage": "pipeline",
-                "status": "failed",
-                "error_type": type(exc).__name__,
-                "error": str(exc),
-                "exit_code": EXIT_PIPELINE,
-            }
+        _failure_event(
+            error,
+            command=command,
+            stage="pipeline",
+            error=exc,
+            exit_code=EXIT_PIPELINE,
         )
         return EXIT_PIPELINE
     finally:
