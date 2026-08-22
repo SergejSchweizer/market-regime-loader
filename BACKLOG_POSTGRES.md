@@ -41,11 +41,11 @@ PR-32 postgres-gold-sync-contracts
 ## PR-31: Backlog PostgreSQL Sync Plan
 
 PR name: `backlog-postgres-sync-plan`
-Status: In Progress
+Status: Merged
 Updated: 2026-08-22
-PR: none
+PR: #33
 Git branch: `pr-31/backlog-postgres-sync-plan`
-Git status: `active-clean`
+Git status: `merged`
 Agent lane: Governance; one agent only
 Depends on: none
 Commit: `docs(pr-31): backlog-postgres-sync-plan add postgres sync backlog`
@@ -72,11 +72,11 @@ Acceptance:
 ## PR-32: PostgreSQL Gold Sync Contracts
 
 PR name: `postgres-gold-sync-contracts`
-Status: Planned
+Status: Merged
 Updated: 2026-08-22
-PR: none
+PR: #34
 Git branch: `pr-32/postgres-gold-sync-contracts`
-Git status: `not-started (branch absent)`
+Git status: `merged`
 Agent lane: Foundation; one weak agent
 Depends on: PR-31
 Commit: `feat(pr-32): postgres-gold-sync-contracts define gold sync boundary`
@@ -103,11 +103,11 @@ Acceptance:
 ## PR-33: Deterministic Gold Row Delta Planner
 
 PR name: `gold-row-delta-planner`
-Status: Planned
+Status: Merged
 Updated: 2026-08-22
-PR: none
+PR: #37
 Git branch: `pr-33/gold-row-delta-planner`
-Git status: `not-started (branch absent)`
+Git status: `merged`
 Agent lane: Agent A; pure logic
 Depends on: PR-32
 Commit: `feat(pr-33): gold-row-delta-planner compute complete gold delta`
@@ -134,11 +134,11 @@ Acceptance:
 ## PR-34: PostgreSQL Gold Sync Adapter
 
 PR name: `postgres-gold-sync-adapter`
-Status: Planned
+Status: Merged
 Updated: 2026-08-22
-PR: none
+PR: #38
 Git branch: `pr-34/postgres-gold-sync-adapter`
-Git status: `not-started (branch absent)`
+Git status: `merged`
 Agent lane: Agent B; PostgreSQL persistence
 Depends on: PR-32
 Commit: `feat(pr-34): postgres-gold-sync-adapter implement transactional repository`
@@ -171,11 +171,11 @@ Acceptance:
 ## PR-35: Provision Dedicated PostgreSQL Service Role
 
 PR name: `postgres-service-role-provisioning`
-Status: Planned
+Status: Merged
 Updated: 2026-08-22
-PR: none
+PR: #35
 Git branch: `pr-35/postgres-service-role-provisioning`
-Git status: `not-started (branch absent)`
+Git status: `merged`
 Agent lane: PostgreSQL operations; one weak agent
 Depends on: PR-31
 Commit: `feat(pr-35): postgres-service-role-provisioning add least privilege role setup`
@@ -202,11 +202,11 @@ Acceptance:
 ## PR-36: PostgreSQL Sync Operational Config
 
 PR name: `postgres-sync-operational-config`
-Status: Planned
+Status: Merged
 Updated: 2026-08-22
-PR: none
+PR: #36
 Git branch: `pr-36/postgres-sync-operational-config`
-Git status: `not-started (branch absent)`
+Git status: `merged`
 Agent lane: Operations; one weak agent
 Depends on: PR-31
 Commit: `feat(pr-36): postgres-sync-operational-config add repository postgres settings`
@@ -231,11 +231,11 @@ Acceptance:
 ## PR-37: Gold To PostgreSQL Complete Delta Sync
 
 PR name: `gold-postgres-delta-sync`
-Status: Planned
+Status: Merged
 Updated: 2026-08-22
-PR: none
+PR: #39
 Git branch: `pr-37/gold-postgres-delta-sync`
-Git status: `not-started (branch absent)`
+Git status: `merged`
 Agent lane: Integration; one agent only
 Depends on: PR-33, PR-34
 Commit: `feat(pr-37): gold-postgres-delta-sync synchronize complete gold state`
@@ -268,11 +268,11 @@ Acceptance:
 ## PR-38: PostgreSQL Gold Sync CLI
 
 PR name: `postgres-gold-sync-cli`
-Status: Planned
+Status: Merged
 Updated: 2026-08-22
-PR: none
+PR: #40
 Git branch: `pr-38/postgres-gold-sync-cli`
-Git status: `not-started (branch absent)`
+Git status: `merged`
 Agent lane: CLI/composition; one weak agent
 Depends on: PR-35, PR-36, PR-37
 Commit: `feat(pr-38): postgres-gold-sync-cli expose repository postgres synchronization`
@@ -299,11 +299,11 @@ Acceptance:
 ## PR-39: Sunday PostgreSQL Gold Sync Cron
 
 PR name: `sunday-postgres-gold-sync-cron`
-Status: Planned
+Status: Merged
 Updated: 2026-08-22
-PR: none
+PR: #41
 Git branch: `pr-39/sunday-postgres-gold-sync-cron`
-Git status: `not-started (branch absent)`
+Git status: `merged`
 Agent lane: Operations; one weak agent
 Depends on: PR-38
 Commit: `feat(pr-39): sunday-postgres-gold-sync-cron chain gold sync after daily run`
