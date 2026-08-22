@@ -58,7 +58,12 @@ def _field(section: BacklogPr, name: str) -> str:
 
 
 def _requirement_ids(section: BacklogPr, prefix: str) -> list[int]:
-    return [int(value) for value in re.findall(rf"^- {prefix}(\d+)(?: \(verifies R\d+\))?:", section.body, re.MULTILINE)]
+    return [
+        int(value)
+        for value in re.findall(
+            rf"^- {prefix}(\d+)(?: \(verifies R\d+\))?:", section.body, re.MULTILINE
+        )
+    ]
 
 
 def _validate(text: str) -> list[BacklogPr]:
@@ -70,7 +75,9 @@ def _validate(text: str) -> list[BacklogPr]:
         pr_name = fields["PR name"]
         assert re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", pr_name)
         assert fields["Status"] in ALLOWED_DELIVERY
-        assert fields["Git status"] in ALLOWED_GIT or fields["Git status"].startswith("active-dirty: ")
+        assert fields["Git status"] in ALLOWED_GIT or fields["Git status"].startswith(
+            "active-dirty: "
+        )
 
         branch_match = BRANCH_RE.fullmatch(fields["Git branch"])
         assert branch_match is not None
