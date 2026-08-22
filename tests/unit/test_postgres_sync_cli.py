@@ -67,11 +67,12 @@ def test_postgres_runtime_composition_uses_exact_protected_endpoint_without_conn
     assert runtime.sync.repository is not None
     assert len(captured) == 1
     config = captured[0]
-    assert getattr(config, "host") == "10.10.1.3"
-    assert getattr(config, "port") == 54321
-    assert getattr(config, "user") == "market-regime-loader"
-    assert getattr(config, "database") == "quant_data"
-    assert getattr(config, "password") == "repo-secret"
+    assert isinstance(config, cli.PostgresSyncConfig)
+    assert config.host == "10.10.1.3"
+    assert config.port == 54321
+    assert config.user == "market-regime-loader"
+    assert config.database == "quant_data"
+    assert config.password == "repo-secret"
     assert "repo-secret" not in repr(config)
 
 
