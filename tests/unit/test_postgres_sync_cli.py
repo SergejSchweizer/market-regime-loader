@@ -33,7 +33,9 @@ def _postgres_env(monkeypatch: pytest.MonkeyPatch, *, password: str = "repo-secr
     monkeypatch.setenv("PGPASSWORD", password)
 
 
-def test_filesystem_gold_source_hashes_and_reads_only_contained_catalog_path(tmp_path: Path) -> None:
+def test_filesystem_gold_source_hashes_and_reads_only_contained_catalog_path(
+    tmp_path: Path,
+) -> None:
     paths = LakePaths(tmp_path / "lake")
     store = GoldBuildStore(paths)
     artifact = store.create(_frame(), build_id="20260822T100000Z")
@@ -168,9 +170,7 @@ def test_postgres_failure_is_nonzero_and_redacts_password_and_credential_text(
 ) -> None:
     _postgres_env(monkeypatch)
     stderr = io.StringIO()
-    credential_text = (
-        "postgresql://market-regime-loader:repo-secret@10.10.1.3:54321/quant_data"
-    )
+    credential_text = "postgresql://market-regime-loader:repo-secret@10.10.1.3:54321/quant_data"
 
     def broken_runtime(**kwargs: object) -> cli.PostgresSyncRuntime:
         raise RuntimeError(f"database failed: {credential_text}")
