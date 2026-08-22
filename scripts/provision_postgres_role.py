@@ -5,8 +5,8 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 POSTGRES_HOST = "10.10.1.3"
 POSTGRES_PORT = 54321
