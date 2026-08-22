@@ -8,9 +8,9 @@ The project is intentionally a **data product**, not a trading system. It does n
 
 ## Status
 
-The reviewed medallion architecture is implemented through the atomic PR sequence in `BACKLOG.md`. PostgreSQL serving synchronization is specified in `BACKLOG_POSTGRES.md`: only canonical Gold is replicated, while Bronze, Silver, immutable Gold bundles, and the authoritative Gold catalog remain local lake concerns.
+The reviewed medallion architecture is implemented through the atomic PR sequence in `BACKLOG.md`, including the PostgreSQL serving-plane sequence: only canonical Gold is replicated, while Bronze, Silver, immutable Gold bundles, and the authoritative Gold catalog remain local lake concerns.
 
-Before implementing a backlog PR, coding agents must read `AGENTS.md`, `BACKLOG.md`, `BACKLOG_POSTGRES.md`, and `ARCHITECTURE.md`.
+Before implementing a backlog PR, coding agents must read `AGENTS.md`, `BACKLOG.md`, and `ARCHITECTURE.md`.
 
 ## Architecture
 

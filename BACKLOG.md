@@ -4,7 +4,7 @@ This backlog is the implementation source of truth for `market-regime-loader`.
 
 The repository loads reusable daily market-state inputs from open/public sources, preserves source history, performs strict incremental updates during normal execution, and publishes deterministic immutable Gold feature snapshots through a Bronze -> Silver -> Gold architecture.
 
-Last reviewed: 2026-08-19
+Last reviewed: 2026-08-22
 
 ## Delivery Policy
 
@@ -1233,15 +1233,15 @@ Acceptance:
 
 ## PR-26: Repair Live Provider Compatibility
 
-Status: In Progress
+Status: Merged
 
-Updated: 2026-08-21
+Updated: 2026-08-22
 
-PR: none
+PR: #28
 
 Git branch: `pr-26/repair-live-provider-compatibility`
 
-Git status: `active-clean`
+Git status: `merged`
 
 Agent lane: Provider maintenance; one agent only
 
@@ -1263,15 +1263,15 @@ Acceptance:
 
 ## PR-27: Parallelize Silver And Gold Polars Work
 
-Status: In Progress
+Status: Merged
 
-Updated: 2026-08-21
+Updated: 2026-08-22
 
-PR: none
+PR: #29
 
 Git branch: `pr-27/parallelize-polars-silver-gold`
 
-Git status: `active-clean`
+Git status: `merged`
 
 Agent lane: Performance; one agent only
 
@@ -1293,15 +1293,15 @@ Acceptance:
 
 ## PR-28: Add Post-Publication Gold Mirror
 
-Status: In Progress
+Status: Merged
 
-Updated: 2026-08-21
+Updated: 2026-08-22
 
-PR: none
+PR: #30
 
 Git branch: `pr-28/gold-publication-mirror`
 
-Git status: `active-clean`
+Git status: `merged`
 
 Agent lane: Operations; one agent only
 
@@ -1323,15 +1323,15 @@ Acceptance:
 
 ## PR-29: Add Protected Operational YAML Configuration
 
-Status: In Progress
+Status: Merged
 
-Updated: 2026-08-21
+Updated: 2026-08-22
 
-PR: none
+PR: #31
 
 Git branch: `pr-29/operational-yaml-config`
 
-Git status: `active-clean`
+Git status: `merged`
 
 Agent lane: Operations; one agent only
 
@@ -1351,15 +1351,15 @@ Acceptance:
 
 ## PR-30: Add Diagnostic Gold Feature Profile
 
-Status: In Progress
+Status: Merged
 
-Updated: 2026-08-21
+Updated: 2026-08-22
 
-PR: none
+PR: #32
 
 Git branch: `pr-30/diagnostic-gold-feature-profile`
 
-Git status: `active-clean`
+Git status: `merged`
 
 Agent lane: Gold presentation; one agent only
 
@@ -1402,3 +1402,251 @@ MVP is complete only when PR-01 through PR-24 are merged and:
 - retention tombstones catalog rows before deleting bundles and cannot create a selectable partial bundle;
 - daily pipeline logs exact delta request bounds, handles pre/post commit failures correctly, and remains network-free in required integration tests;
 - README, ARCHITECTURE, AGENTS, and BACKLOG remain synchronized.
+
+## PostgreSQL Gold Serving Plane
+
+This section consolidates the former `BACKLOG_POSTGRES.md`. Only the canonical
+Gold dataset is replicated to PostgreSQL; Parquet Gold remains authoritative.
+The target is `10.10.1.3:54321`, the application role is exactly
+`market-regime-loader`, and credentials are runtime-only and never committed,
+logged, or persisted. PostgreSQL stores `timestamp_m1` as `TIMESTAMPTZ(6)` in
+UTC. The first synchronization loads the complete current Gold history; later
+synchronizations reconcile the complete row-digest state, including missed
+runs and historical corrections. Sync logs use the existing
+`${PROJECT_ROOT}/.logs/market-regime-loader.log` path.
+
+Dependency graph:
+
+```text
+PR-31 -> PR-32 -> PR-33
+   |       |\
+   |       +-> PR-34 -> PR-37 -> PR-38 -> PR-39
+   +-------> PR-35 -----^   \
+   +-------> PR-36 -----------+
+```
+
+## PR-31: Backlog PostgreSQL Sync Plan
+
+PR name: `backlog-postgres-sync-plan`
+Status: Merged
+Updated: 2026-08-22
+PR: #33
+Git branch: `pr-31/backlog-postgres-sync-plan`
+Git status: `merged`
+Agent lane: Governance; one agent only
+Depends on: none
+Commit: `docs(pr-31): backlog-postgres-sync-plan add postgres sync backlog`
+Design patterns: Specification/Policy Object; Architectural baseline only.
+
+Description:
+- R1: Define PR-31 through PR-39 with exact dependencies, Git metadata, and one-to-one requirements and acceptance criteria.
+- R2: Define Gold-only serving to PostgreSQL at `10.10.1.3:54321`; Parquet Gold remains authoritative.
+- R3: Define the dedicated `market-regime-loader` runtime role and protected credential handling.
+- R4: Define UTC `timestamp_m1` storage as `TIMESTAMPTZ(6)` and observation-day identity.
+- R5: Define complete bootstrap and complete accumulated-delta reconciliation semantics.
+- R6: Define the shared project log path and an executable offline governance contract.
+
+Acceptance:
+- A1 (verifies R1): PR-31 through PR-39 metadata is complete and unique.
+- A2 (verifies R2): the contract names only canonical Gold as the PostgreSQL source.
+- A3 (verifies R3): role and credential rules contain no operational secret.
+- A4 (verifies R4): the timestamp and UTC contracts are explicit.
+- A5 (verifies R5): bootstrap, missed-run, and historical-revision behavior is explicit.
+- A6 (verifies R6): the single project log path is explicit and tested.
+
+## PR-32: PostgreSQL Gold Sync Contracts
+
+PR name: `postgres-gold-sync-contracts`
+Status: Merged
+Updated: 2026-08-22
+PR: #34
+Git branch: `pr-32/postgres-gold-sync-contracts`
+Git status: `merged`
+Agent lane: Foundation; one weak agent
+Depends on: PR-31
+Commit: `feat(pr-32): postgres-gold-sync-contracts define gold sync boundary`
+Design patterns: Ports and Adapters, Repository, Value Object, Dependency Injection.
+
+Description:
+- R1: Define the Gold-to-PostgreSQL dataset and internal sync-table contracts.
+- R2: Define immutable sync state, row digest, delta plan, and result value objects.
+- R3: Define a narrow application `GoldSyncRepository` protocol with no `psycopg` import.
+- R4: Require exact schema/feature compatibility, catalog-current complete-build selection, UTC sessions, and redaction.
+
+Acceptance:
+- A1 (verifies R1): only canonical Gold is publishable.
+- A2 (verifies R2): all value objects and result counts are typed and immutable.
+- A3 (verifies R3): application contracts remain adapter-independent.
+- A4 (verifies R4): incompatible or non-current sources fail deterministically.
+
+## PR-33: Deterministic Gold Row Delta Planner
+
+PR name: `gold-row-delta-planner`
+Status: Merged
+Updated: 2026-08-22
+PR: #37
+Git branch: `pr-33/gold-row-delta-planner`
+Git status: `merged`
+Agent lane: Application planning; one agent only
+Depends on: PR-32
+Commit: `feat(pr-33): gold-row-delta-planner compute complete gold delta`
+Design patterns: Strategy, Value Object, Dependency Injection.
+
+Description:
+- R1: Plan deterministic insert/update/delete/unchanged sets from complete source and target digests.
+- R2: Support empty-target bootstrap, stale keys, historical revisions, missed runs, and no-op checkpoints.
+- R3: Preserve stable ordering, exact counts, and credential-free contracts.
+
+Acceptance:
+- A1 (verifies R1): mixed deltas contain exactly the expected keys and counts.
+- A2 (verifies R2): bootstrap and accumulated missed-run reconciliation converge.
+- A3 (verifies R3): repeated planning is deterministic and credential-free.
+
+## PR-34: PostgreSQL Gold Sync Adapter
+
+PR name: `postgres-gold-sync-adapter`
+Status: Merged
+Updated: 2026-08-22
+PR: #38
+Git branch: `pr-34/postgres-gold-sync-adapter`
+Git status: `merged`
+Agent lane: Agent B; PostgreSQL persistence
+Depends on: PR-32
+Commit: `feat(pr-34): postgres-gold-sync-adapter implement transactional repository`
+Design patterns: Adapter, Repository, Unit of Work, Dependency Injection.
+
+Description:
+- R1: Add `psycopg` as the only PostgreSQL client and configure the exact endpoint, role, database, protected password, and UTC timezone.
+- R2: Implement idempotent consumer and internal sync-table DDL with exact Gold types.
+- R3: Read only state/digests for comparison and apply scoped insert/update/delete deltas under an advisory transaction lock.
+- R4: Commit sync state last, roll back all mutations together, and redact credentials.
+
+Acceptance:
+- A1 (verifies R1): dependency and connection identity are exact.
+- A2 (verifies R2): DDL, keys, columns, and internal tables are exact and idempotent.
+- A3 (verifies R3): reads and mutation ordering avoid full-target reloads.
+- A4 (verifies R4): failures roll back and diagnostics contain no credentials.
+
+## PR-35: Provision Dedicated PostgreSQL Service Role
+
+PR name: `postgres-service-role-provisioning`
+Status: Merged
+Updated: 2026-08-22
+PR: #35
+Git branch: `pr-35/postgres-service-role-provisioning`
+Git status: `merged`
+Agent lane: PostgreSQL operations; one weak agent
+Depends on: PR-31
+Commit: `feat(pr-35): postgres-service-role-provisioning add least privilege role setup`
+Design patterns: Command, Least Privilege, Idempotent Provisioning.
+
+Description:
+- R1: Provision or validate exactly the `market-regime-loader` LOGIN role at the dedicated endpoint.
+- R2: Enforce least-privilege attributes and only the `market_regime` and `market_regime_sync` schema rights.
+- R3: Keep administrator and runtime credentials separate, protected, redacted, and idempotent; incompatible state fails safely.
+
+Acceptance:
+- A1 (verifies R1): endpoint and role identity are exact.
+- A2 (verifies R2): all required role attributes and schema grants are exact.
+- A3 (verifies R3): credential separation, idempotency, and failure behavior pass offline.
+
+## PR-36: PostgreSQL Sync Operational Config
+
+PR name: `postgres-sync-operational-config`
+Status: Merged
+Updated: 2026-08-22
+PR: #36
+Git branch: `pr-36/postgres-sync-operational-config`
+Git status: `merged`
+Agent lane: Operations; one weak agent
+Depends on: PR-31
+Commit: `feat(pr-36): postgres-sync-operational-config add repository postgres settings`
+Design patterns: Adapter, Dependency Injection.
+
+Description:
+- R1: Extend protected ignored YAML config with exact PostgreSQL host, port, role, database, and password settings.
+- R2: Export shell-safe `PGHOST`, `PGPORT`, `PGUSER`, `PGDATABASE`, and `PGPASSWORD`; validate and redact failures.
+- R3: Define `${PROJECT_ROOT}/.logs/market-regime-loader.log` as the canonical log path.
+
+Acceptance:
+- A1 (verifies R1): valid settings resolve exactly.
+- A2 (verifies R2): export, validation, quoting, and redaction pass offline.
+- A3 (verifies R3): config/log paths are ignored and canonical.
+
+## PR-37: Gold To PostgreSQL Complete Delta Sync
+
+PR name: `gold-postgres-delta-sync`
+Status: Merged
+Updated: 2026-08-22
+PR: #39
+Git branch: `pr-37/gold-postgres-delta-sync`
+Git status: `merged`
+Agent lane: Integration; one agent only
+Depends on: PR-33, PR-34
+Commit: `feat(pr-37): gold-postgres-delta-sync synchronize complete gold state`
+Design patterns: Facade/Orchestrator, Unit of Work, Repository, Dependency Injection.
+
+Description:
+- R1: Resolve only the catalog-current compatible Gold build and reconcile its complete row-digest state.
+- R2: Bootstrap every row, apply accumulated insert/update/delete deltas, propagate historical corrections, and perform no unrelated pipeline work.
+- R3: Verify post-write bounds/counts, preserve prior state on failure, and return typed credential-free counts.
+
+Acceptance:
+- A1 (verifies R1): only current Gold and sync repositories are called.
+- A2 (verifies R2): bootstrap, no-op, mixed delta, missed-run, revision, and delete cases are exact.
+- A3 (verifies R3): verification failure and retry preserve consistency and result fields are exact.
+
+## PR-38: PostgreSQL Gold Sync CLI
+
+PR name: `postgres-gold-sync-cli`
+Status: Merged
+Updated: 2026-08-22
+PR: #40
+Git branch: `pr-38/postgres-gold-sync-cli`
+Git status: `merged`
+Agent lane: CLI/composition; one weak agent
+Depends on: PR-35, PR-36, PR-37
+Commit: `feat(pr-38): postgres-gold-sync-cli expose repository postgres synchronization`
+Design patterns: Command, Dependency Injection.
+
+Description:
+- R1: Add exactly one `gold-sync-postgres` command composed from protected runtime variables and existing event logging.
+- R2: Keep the command read-only toward local source/Gold production and report structured success/failure counts without secrets.
+
+Acceptance:
+- A1 (verifies R1): parser and dispatch expose exactly the command and exact connection settings.
+- A2 (verifies R2): no-side-effect, structured-output, redaction, and stable error tests pass.
+
+## PR-39: Sunday PostgreSQL Gold Sync Cron
+
+PR name: `sunday-postgres-gold-sync-cron`
+Status: Merged
+Updated: 2026-08-22
+PR: #41
+Git branch: `pr-39/sunday-postgres-gold-sync-cron`
+Git status: `merged`
+Agent lane: Operations; one weak agent
+Depends on: PR-38
+Commit: `feat(pr-39): sunday-postgres-gold-sync-cron chain gold sync after daily run`
+Design patterns: Command; Architectural baseline only for declarative scheduling.
+
+Description:
+- R1: Schedule the host-local chain at exactly `0 10 * * 0`.
+- R2: Load protected config, create `.logs`, run `run-daily`, and run `gold-sync-postgres` only after success, using one log.
+- R3: Preserve local Gold on PostgreSQL failure, provide a sync-only retry, and keep source reconciliation separate.
+
+Acceptance:
+- A1 (verifies R1): Sunday expression and no Saturday main schedule are exact.
+- A2 (verifies R2): order, `&&` gating, log path, and full/delta semantics are tested.
+- A3 (verifies R3): failure/retry, no-reconcile, no-secret, and no-scheduled-GitHub-ingestion cases pass.
+
+## Abgeschlossene PRs – Kurzfassung
+
+- PR-01–05: Repository-Grundlage, Qualitätsgates, Registry/Pfade, Parquet-I/O, HTTP-Port sowie Delta-/Reconcile-Planung.
+- PR-06–10: Provider-Adapter für CBOE, STOXX, Yahoo, ECB und FRED.
+- PR-11–14: Betriebsmanifeste, Bronze-Orchestrierung, kanonisches Silver und Inventory-CLI.
+- PR-15–17: Volatilitäts- und Makro-Features sowie validierter kanonischer Gold-Frame.
+- PR-18–22: Immutable Gold-Builds, Katalogauflösung, Sidecars, Publikations-State-Machine und sichere Retention.
+- PR-23–25: Delta-only-Tagespipeline, Backlog-Governance und tägliches Cron-Template.
+- PR-26–30: Live-Provider-Reparaturen, Polars-Parallelisierung, Gold-Mirror, geschützte YAML-Konfiguration und diagnostisches Gold-Profil.
+- PR-31–39: PostgreSQL-Serving-Plan, Sync-Verträge/Planner/Adapter, Service-Rolle, Betriebskonfiguration, vollständige Delta-Synchronisierung, CLI und Sonntags-Cron.

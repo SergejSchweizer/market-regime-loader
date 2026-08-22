@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-BACKLOG = Path("BACKLOG_POSTGRES.md")
+BACKLOG = Path("BACKLOG.md")
 ALLOWED_DELIVERY = {"Planned", "In Progress", "Blocked", "Ready", "Merged"}
 ALLOWED_GIT = {
     "not-started (branch absent)",
@@ -67,7 +67,7 @@ def _requirement_ids(section: BacklogPr, prefix: str) -> list[int]:
 
 
 def _validate(text: str) -> list[BacklogPr]:
-    sections = _sections(text)
+    sections = [section for section in _sections(text) if int(section.pr_id[3:]) >= 31]
     assert [section.pr_id for section in sections] == [f"PR-{value:02d}" for value in range(31, 40)]
     for section in sections:
         fields = {name: _field(section, name) for name in REQUIRED_FIELDS}
@@ -121,8 +121,8 @@ def test_validator_rejects_missing_pr_name_in_branch() -> None:
 
 def test_validator_rejects_requirement_acceptance_mismatch() -> None:
     text = BACKLOG.read_text(encoding="utf-8").replace(
-        "- A7 (verifies R7): the offline contract test fails deterministically",
-        "- A8 (verifies R7): the offline contract test fails deterministically",
+        "- A4 (verifies R4): incompatible or non-current sources fail deterministically.",
+        "- A5 (verifies R4): incompatible or non-current sources fail deterministically.",
         1,
     )
     with pytest.raises(AssertionError):
