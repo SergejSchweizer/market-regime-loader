@@ -58,19 +58,28 @@ def _field(section: BacklogPr, name: str) -> str:
 
 
 def _requirement_ids(section: BacklogPr, prefix: str) -> list[int]:
-    return [int(value) for value in re.findall(rf"^- {prefix}(\d+)(?: \(verifies R\d+\))?:", section.body, re.MULTILINE)]
+    return [
+        int(value)
+        for value in re.findall(
+            rf"^- {prefix}(\d+)(?: \(verifies R\d+\))?:", section.body, re.MULTILINE
+        )
+    ]
 
 
 def _validate(text: str) -> list[BacklogPr]:
     sections = _sections(text)
-    assert [section.pr_id for section in sections] == [f"PR-{value:02d}" for value in range(31, 40)]
+    assert [section.pr_id for section in sections] == [
+        f"PR-{value:02d}" for value in range(31, 40)
+    ]
     for section in sections:
         fields = {name: _field(section, name) for name in REQUIRED_FIELDS}
         pr_lower = section.pr_id.lower()
         pr_name = fields["PR name"]
         assert re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", pr_name)
         assert fields["Status"] in ALLOWED_DELIVERY
-        assert fields["Git status"] in ALLOWED_GIT or fields["Git status"].startswith("active-dirty: ")
+        assert fields["Git status"] in ALLOWED_GIT or fields["Git status"].startswith(
+            "active-dirty: "
+        )
 
         branch_match = BRANCH_RE.fullmatch(fields["Git branch"])
         assert branch_match is not None
