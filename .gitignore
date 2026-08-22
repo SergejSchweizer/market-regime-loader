@@ -9,6 +9,7 @@ __pycache__/
 coverage.xml
 htmlcov/
 *.log
+.logs/
 .DS_Store
 lake/
 config.yaml
