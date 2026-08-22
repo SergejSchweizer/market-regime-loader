@@ -35,9 +35,7 @@ def _frame(indices: tuple[int, ...]) -> pl.DataFrame:
     data: dict[str, list[object]] = {"timestamp_m1": [_ts(index) for index in indices]}
     for column_index, column in enumerate(GOLD_COLUMNS[1:], start=1):
         data[column] = [float(index + column_index) for index in indices]
-    return pl.DataFrame(data).with_columns(
-        pl.col("timestamp_m1").cast(pl.Datetime("us", "UTC"))
-    )
+    return pl.DataFrame(data).with_columns(pl.col("timestamp_m1").cast(pl.Datetime("us", "UTC")))
 
 
 def _change(frame: pl.DataFrame, index: int, amount: float = 1000.0) -> pl.DataFrame:
