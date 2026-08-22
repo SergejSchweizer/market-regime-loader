@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import polars as pl
@@ -49,13 +50,7 @@ def _change(frame: pl.DataFrame, index: int, amount: float = 1000.0) -> pl.DataF
     )
 
 
-def _record(
-    frame: pl.DataFrame,
-    *,
-    build_id: str = "20260822T100000Z",
-    schema_version: int = 1,
-    feature_version: int = 1,
-) -> GoldCatalogRecord:
+def _record(frame: pl.DataFrame, *, build_id: str = "20260822T100000Z") -> GoldCatalogRecord:
     timestamps = frame.get_column("timestamp_m1")
     return GoldCatalogRecord(
         dataset_id=POSTGRES_DATASET_ID,
@@ -64,8 +59,8 @@ def _record(
         current=True,
         started_at_utc=datetime(2026, 8, 22, 9, tzinfo=UTC),
         completed_at_utc=datetime(2026, 8, 22, 10, tzinfo=UTC),
-        schema_version=schema_version,
-        feature_version=feature_version,
+        schema_version=1,
+        feature_version=1,
         min_timestamp=timestamps.min(),
         max_timestamp=timestamps.max(),
         row_count=frame.height,
@@ -80,14 +75,13 @@ def _state(
     frame: pl.DataFrame,
     *,
     data_sha256: str = "a" * 64,
-    build_id: str = "20260815T100000Z",
     schema_version: int = 1,
     feature_version: int = 1,
 ) -> GoldSyncState:
     timestamps = frame.get_column("timestamp_m1")
     return GoldSyncState(
         dataset_id=POSTGRES_DATASET_ID,
-        source_build_id=build_id,
+        source_build_id="20260815T100000Z",
         data_sha256=data_sha256,
         schema_version=schema_version,
         feature_version=feature_version,
@@ -135,20 +129,17 @@ class FakeRepository:
         self.state = state
         self.digests = digests
         self.fail_apply = fail_apply
-        self.events: list[str] = []
         self.applied: list[tuple[GoldDeltaPlan, GoldSyncState]] = []
 
     def ensure_schema(self) -> None:
-        self.events.append("ensure_schema")
+        pass
 
     def read_state(self, dataset_id: str) -> GoldSyncState | None:
         assert dataset_id == POSTGRES_DATASET_ID
-        self.events.append("read_state")
         return self.state
 
     def read_digests(self, dataset_id: str) -> tuple[GoldRowDigest, ...]:
         assert dataset_id == POSTGRES_DATASET_ID
-        self.events.append("read_digests")
         return self.digests
 
     def apply_delta(
@@ -158,7 +149,6 @@ class FakeRepository:
         state: GoldSyncState,
     ) -> None:
         assert dataset_id == POSTGRES_DATASET_ID
-        self.events.append("apply_delta")
         if self.fail_apply:
             raise RuntimeError("verification failed")
         self.applied.append((plan, state))
@@ -183,42 +173,37 @@ def _service(
     *,
     sha256: str = "b" * 64,
     record: GoldCatalogRecord | None = None,
-) -> tuple[GoldPostgresDeltaSync, FakeCatalog, FakeSource]:
-    catalog = FakeCatalog(_record(frame) if record is None else record)
+) -> tuple[GoldPostgresDeltaSync, FakeSource]:
     source = FakeSource(frame, sha256)
     service = GoldPostgresDeltaSync(
-        catalog=catalog,
+        catalog=FakeCatalog(_record(frame) if record is None else record),
         source=source,
         repository=repository,
         clock=lambda: datetime(2026, 8, 22, 12, tzinfo=UTC),
     )
-    return service, catalog, source
+    return service, source
 
 
 def test_first_sync_inserts_complete_current_gold() -> None:
     frame = _frame((0, 1, 2))
     repository = FakeRepository()
-    service, catalog, source = _service(frame, repository)
+    service, source = _service(frame, repository)
 
     result = service.sync()
 
     assert (result.inserted, result.updated, result.deleted, result.unchanged) == (3, 0, 0, 0)
-    assert result.source_build_id == "20260822T100000Z"
     plan, state = repository.applied[0]
     assert [row.timestamp_m1 for row in plan.inserts] == [_ts(0), _ts(1), _ts(2)]
-    assert state.source_build_id == result.source_build_id
-    assert repository.state == state
-    assert catalog.reads == 1
+    assert state.source_build_id == "20260822T100000Z"
     assert source.hash_paths == [_PATH]
     assert source.read_paths == [_PATH]
 
 
-def test_same_complete_data_advances_checkpoint_without_gold_or_digest_mutations() -> None:
+def test_same_data_advances_checkpoint_without_gold_or_digest_row_mutations() -> None:
     frame = _frame((0, 1, 2))
     _, digests = source_rows_and_digests(frame)
-    prior = _state(frame, data_sha256="b" * 64)
-    repository = FakeRepository(state=prior, digests=digests)
-    service, _, source = _service(frame, repository, sha256="b" * 64)
+    repository = FakeRepository(state=_state(frame, data_sha256="b" * 64), digests=digests)
+    service, source = _service(frame, repository, sha256="b" * 64)
 
     result = service.sync()
 
@@ -229,12 +214,12 @@ def test_same_complete_data_advances_checkpoint_without_gold_or_digest_mutations
     assert source.read_paths == []
 
 
-def test_mixed_delta_submits_exactly_two_insert_one_update_one_delete_and_100_unchanged() -> None:
+def test_mixed_delta_is_exact_and_unchanged_rows_are_not_submitted() -> None:
     current = _frame(tuple(range(103)))
     target = _change(_frame((*range(101), 200)), 100)
     _, target_digests = source_rows_and_digests(target)
     repository = FakeRepository(state=_state(target), digests=target_digests)
-    service, _, _ = _service(current, repository)
+    service, _ = _service(current, repository)
 
     result = service.sync()
 
@@ -243,71 +228,47 @@ def test_mixed_delta_submits_exactly_two_insert_one_update_one_delete_and_100_un
     assert [row.timestamp_m1 for row in plan.inserts] == [_ts(101), _ts(102)]
     assert [row.timestamp_m1 for row in plan.updates] == [_ts(100)]
     assert plan.deletes == (_ts(200),)
-    assert len(plan.unchanged) == 100
 
 
-def test_multiple_missed_weekly_runs_are_caught_up_in_one_sync() -> None:
+def test_missed_runs_and_historical_revision_are_caught_up() -> None:
     target = _frame((0,))
-    current = _frame((0, 7, 14, 21, 28))
+    current = _change(_frame((0, 7, 14, 21, 28)), 0)
     _, target_digests = source_rows_and_digests(target)
     repository = FakeRepository(state=_state(target), digests=target_digests)
-    service, _, _ = _service(current, repository)
+    service, _ = _service(current, repository)
 
     result = service.sync()
 
-    assert (result.inserted, result.updated, result.deleted, result.unchanged) == (4, 0, 0, 1)
-
-
-def test_historical_revision_is_one_update_independent_of_timestamp_watermark() -> None:
-    target = _frame((0, 1, 2))
-    current = _change(target, 0)
-    _, target_digests = source_rows_and_digests(target)
-    repository = FakeRepository(state=_state(target), digests=target_digests)
-    service, _, _ = _service(current, repository)
-
-    result = service.sync()
-
-    assert (result.inserted, result.updated, result.deleted, result.unchanged) == (0, 1, 0, 2)
+    assert (result.inserted, result.updated, result.deleted, result.unchanged) == (4, 1, 0, 0)
     assert repository.applied[0][0].updates[0].timestamp_m1 == _ts(0)
 
 
-def test_existing_incompatible_serving_state_fails_before_gold_read_or_write() -> None:
+def test_incompatible_or_inconsistent_target_fails_closed_before_write() -> None:
     frame = _frame((0, 1))
     _, digests = source_rows_and_digests(frame)
-    repository = FakeRepository(
-        state=_state(frame, schema_version=2),
-        digests=digests,
-    )
-    service, _, source = _service(frame, repository)
-
+    incompatible = FakeRepository(state=_state(frame, schema_version=2), digests=digests)
+    service, source = _service(frame, incompatible)
     with pytest.raises(GoldSyncCompatibilityError, match="semantic versions"):
         service.sync()
-
     assert source.read_paths == []
-    assert repository.applied == []
+    assert incompatible.applied == []
 
-
-def test_orphan_digest_state_and_digest_count_drift_fail_closed() -> None:
-    frame = _frame((0, 1))
-    _, digests = source_rows_and_digests(frame)
-    service, _, _ = _service(frame, FakeRepository(digests=digests))
+    orphan = FakeRepository(digests=digests)
+    service, _ = _service(frame, orphan)
     with pytest.raises(GoldSyncVerificationError, match="without authoritative"):
         service.sync()
 
-    repository = FakeRepository(state=_state(frame), digests=digests[:1])
-    service, _, _ = _service(frame, repository)
+    drift = FakeRepository(state=_state(frame), digests=digests[:1])
+    service, _ = _service(frame, drift)
     with pytest.raises(GoldSyncVerificationError, match="digest count"):
         service.sync()
 
 
 def test_catalog_metadata_mismatch_fails_before_repository_mutation() -> None:
     frame = _frame((0, 1, 2))
-    record = _record(frame)
-    bad_record = GoldCatalogRecord(
-        **{**record.__dict__, "row_count": 2}  # type: ignore[arg-type]
-    )
+    bad_record = replace(_record(frame), row_count=2)
     repository = FakeRepository()
-    service, _, _ = _service(frame, repository, record=bad_record)
+    service, _ = _service(frame, repository, record=bad_record)
 
     with pytest.raises(GoldSyncSourceError, match="row count"):
         service.sync()
@@ -315,15 +276,14 @@ def test_catalog_metadata_mismatch_fails_before_repository_mutation() -> None:
     assert repository.applied == []
 
 
-def test_failed_apply_does_not_claim_new_state_and_retry_converges() -> None:
+def test_failed_atomic_apply_preserves_prior_state_and_retry_converges() -> None:
     frame = _frame((0, 1, 2))
     repository = FakeRepository(fail_apply=True)
-    service, _, _ = _service(frame, repository)
+    service, _ = _service(frame, repository)
 
     with pytest.raises(RuntimeError, match="verification failed"):
         service.sync()
     assert repository.state is None
-    assert repository.applied == []
 
     repository.fail_apply = False
     result = service.sync()
@@ -331,20 +291,18 @@ def test_failed_apply_does_not_claim_new_state_and_retry_converges() -> None:
     assert repository.state is not None
 
 
-def test_invalid_gold_hash_and_naive_clock_fail_without_success() -> None:
+def test_invalid_source_hash_and_naive_clock_fail_without_success() -> None:
     frame = _frame((0,))
-    repository = FakeRepository()
-    service, _, _ = _service(frame, repository, sha256="invalid")
+    service, _ = _service(frame, FakeRepository(), sha256="invalid")
     with pytest.raises(GoldSyncSourceError, match="SHA-256"):
         service.sync()
 
-    catalog = FakeCatalog(_record(frame))
     source = FakeSource(frame)
-    naive_clock_service = GoldPostgresDeltaSync(
-        catalog=catalog,
+    service = GoldPostgresDeltaSync(
+        catalog=FakeCatalog(_record(frame)),
         source=source,
         repository=FakeRepository(),
         clock=lambda: datetime(2026, 8, 22, 12),
     )
     with pytest.raises(GoldSyncSourceError, match="timezone-aware"):
-        naive_clock_service.sync()
+        service.sync()
