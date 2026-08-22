@@ -1,6 +1,7 @@
 from pathlib import Path
 
 CRON_TEMPLATE = Path("ops/market-regime-loader.cron")
+CRON_RUNNER = Path("ops/run-market-regime-loader-sunday.sh")
 QUALITY_GATES_WORKFLOW = Path(".github/workflows/quality-gates.yml")
 
 
@@ -14,18 +15,18 @@ def _job_line() -> str:
 
 def test_sunday_gold_sync_cron_template_is_operational() -> None:
     job = _job_line()
+    runner = CRON_RUNNER.read_text(encoding="utf-8")
 
     assert job.startswith("0 10 * * 0 ")
-    assert "cd /srv/market-regime-loader" in job
-    assert "scripts/export_cron_config.py config.yaml" in job
-    assert 'mkdir -p "$PROJECT_ROOT/.logs"' in job
-    assert '--lake-root "$LAKE_ROOT" run-daily' in job
-    assert '--lake-root "$LAKE_ROOT" gold-sync-postgres' in job
-    assert job.index("run-daily") < job.index("gold-sync-postgres")
-    assert "run-daily &&" in job
-    assert '>> "$LOG_PATH" 2>&1' in job
+    assert job == "0 10 * * 0 /srv/market-regime-loader/ops/run-market-regime-loader-sunday.sh"
+    assert '"$PROJECT_ROOT/scripts/export_cron_config.py" "$CONFIG_FILE"' in runner
+    assert 'mkdir -p "$LOG_DIR"' in runner
+    assert 'exec >>"$LOG_PATH" 2>&1' in runner
+    assert '"$CLI" --lake-root "$LAKE_ROOT" run-daily' in runner
+    assert '"$CLI" --lake-root "$LAKE_ROOT" gold-sync-postgres' in runner
+    assert runner.index("run-daily") < runner.index("gold-sync-postgres")
     assert "/var/log" not in job
-    assert "reconcile" not in job
+    assert "reconcile" not in job + runner
 
 
 def test_cron_template_has_exactly_one_job_and_no_database_secret_literal() -> None:

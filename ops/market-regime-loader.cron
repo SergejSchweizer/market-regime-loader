@@ -1,4 +1,6 @@
 # Install with: crontab ops/market-regime-loader.cron
 # The deployment host's local time zone determines when this runs.
-# Protected runtime configuration lives in ignored config.yaml and is exported shell-safely.
-0 10 * * 0 cd /srv/market-regime-loader && eval "$(/usr/local/bin/uv run python scripts/export_cron_config.py config.yaml)" && mkdir -p "$PROJECT_ROOT/.logs" && { /usr/local/bin/uv run market-regime-loader --lake-root "$LAKE_ROOT" run-daily && /usr/local/bin/uv run market-regime-loader --lake-root "$LAKE_ROOT" gold-sync-postgres; } >> "$LOG_PATH" 2>&1
+# The runner owns configuration export, logging, daily execution, and PostgreSQL sync.
+
+# Sunday at 10:00: publish local Gold, then synchronize PostgreSQL on success.
+0 10 * * 0 /srv/market-regime-loader/ops/run-market-regime-loader-sunday.sh

@@ -377,8 +377,10 @@ The optional Gold mirror still runs only as part of local publication; a Postgre
 The data lake is intended to run on the deployment host/NAS, not as scheduled GitHub Actions ingestion. The checked-in crontab template runs every **Sunday at 10:00 in the deployment host's local time zone**. It loads protected configuration, creates the project log directory, publishes local Gold, and only after a successful `run-daily` synchronizes PostgreSQL:
 
 ```cron
-0 10 * * 0 cd /srv/market-regime-loader && eval "$(/usr/local/bin/uv run python scripts/export_cron_config.py config.yaml)" && mkdir -p "$PROJECT_ROOT/.logs" && { /usr/local/bin/uv run market-regime-loader --lake-root "$LAKE_ROOT" run-daily && /usr/local/bin/uv run market-regime-loader --lake-root "$LAKE_ROOT" gold-sync-postgres; } >> "$LOG_PATH" 2>&1
+0 10 * * 0 /srv/market-regime-loader/ops/run-market-regime-loader-sunday.sh
 ```
+
+The runner script resolves its project root, exports the protected `config.yaml`, creates `.logs`, and appends both command streams to `market-regime-loader.log`. The PostgreSQL sync runs only after `run-daily` succeeds.
 
 Install it for the service account after reviewing the absolute project path:
 
