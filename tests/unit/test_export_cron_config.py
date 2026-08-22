@@ -65,7 +65,9 @@ def test_export_rejects_wrong_postgres_endpoint_or_user(tmp_path: Path) -> None:
 
 def test_export_rejects_missing_postgres_password_without_leaking_secret(tmp_path: Path) -> None:
     config = tmp_path / "config.yaml"
-    config.write_text(_config().replace("  postgres_password: 'repo secret'\n", ""), encoding="utf-8")
+    config.write_text(
+        _config().replace("  postgres_password: 'repo secret'\n", ""), encoding="utf-8"
+    )
     with pytest.raises(ValueError, match="postgres_password") as exc_info:
         export(config)
     assert "repo secret" not in str(exc_info.value)
