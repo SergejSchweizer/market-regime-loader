@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol, Sequence
+from typing import Protocol
 
 from application.gold_catalog import (
+    STRICT_CURRENT,
     GoldCatalogRecord,
     GoldCompatibility,
-    STRICT_CURRENT,
 )
 from application.gold_frame import GOLD_COLUMNS, GOLD_FEATURE_VERSION, GOLD_SCHEMA_VERSION
 
