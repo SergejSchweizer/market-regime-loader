@@ -169,7 +169,7 @@ class GoldSyncResult:
 
 
 class GoldSyncRepository(Protocol):
-    """Narrow serving-plane Repository port; concrete psycopg stays in ingestion/."""
+    """Narrow serving-plane Repository port; concrete database client stays outside."""
 
     def ensure_schema(self) -> None: ...
 
