@@ -68,9 +68,7 @@ def _requirement_ids(section: BacklogPr, prefix: str) -> list[int]:
 
 def _validate(text: str) -> list[BacklogPr]:
     sections = _sections(text)
-    assert [section.pr_id for section in sections] == [
-        f"PR-{value:02d}" for value in range(31, 40)
-    ]
+    assert [section.pr_id for section in sections] == [f"PR-{value:02d}" for value in range(31, 40)]
     for section in sections:
         fields = {name: _field(section, name) for name in REQUIRED_FIELDS}
         pr_lower = section.pr_id.lower()
