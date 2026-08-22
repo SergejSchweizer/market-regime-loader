@@ -2,15 +2,15 @@
 
 Reusable daily market-state loader for quantitative research and portfolio systems.
 
-The repository acquires open/public market and macro series, preserves their historical observations in a deterministic Parquet lake, normalizes them into a canonical daily schema, derives causal market-state features, and publishes immutable Gold snapshots for downstream consumers.
+The repository acquires open/public market and macro series, preserves their historical observations in a deterministic Parquet lake, normalizes them into a canonical daily schema, derives causal market-state features, and publishes immutable Gold snapshots for downstream consumers. Canonical Gold can additionally be replicated into PostgreSQL as a rebuildable serving-plane copy; immutable Parquet Gold remains the source of truth.
 
 The project is intentionally a **data product**, not a trading system. It does not own HMM states, `risk_on`/`risk_off` labels, prediction targets, portfolio weights, or execution decisions.
 
 ## Status
 
-The reviewed medallion architecture is implemented through the atomic PR sequence in `BACKLOG.md`: provider ingestion, incremental Bronze, canonical Silver, causal Gold features, immutable Gold bundles, authoritative catalog publication, materialized root views, retention, and the operational CLI are covered by the repository quality gates.
+The reviewed medallion architecture is implemented through the atomic PR sequence in `BACKLOG.md`. PostgreSQL serving synchronization is specified in `BACKLOG_POSTGRES.md`: only canonical Gold is replicated, while Bronze, Silver, immutable Gold bundles, and the authoritative Gold catalog remain local lake concerns.
 
-Before implementing a backlog PR, coding agents must read `AGENTS.md`, `BACKLOG.md`, and `ARCHITECTURE.md`.
+Before implementing a backlog PR, coding agents must read `AGENTS.md`, `BACKLOG.md`, `BACKLOG_POSTGRES.md`, and `ARCHITECTURE.md`.
 
 ## Architecture
 
@@ -27,13 +27,16 @@ The implementation uses **hexagonal architecture (Ports and Adapters)** with dep
           persistence ports       provider ports
                    ^                   ^
                    |                   |
-        Parquet/JSON/PNG         HTTP/provider
+        Parquet/PostgreSQL       HTTP/provider
         repository adapters       adapters
                    \                   /
                     +--------+---------+
                              |
                              v
                  Bronze -> Silver -> Gold
+                                      |
+                                      v
+                              PostgreSQL serving
 ```
 
 Core design patterns are deliberately explicit:
@@ -41,8 +44,8 @@ Core design patterns are deliberately explicit:
 - **Adapter** for provider and persistence implementations.
 - **Strategy** for retry, update/reconciliation, and consumer-resolution policies.
 - **Registry/Factory** for canonical provider/series routing; orchestration must not use provider `if/elif` ladders.
-- **Repository** for Bronze, Silver, ingestion state, run manifests, Gold build storage, and the Gold catalog.
-- **Unit of Work** for one-series ingestion durability and Gold publication commit boundaries.
+- **Repository** for Bronze, Silver, ingestion state, run manifests, Gold build storage, the Gold catalog, and PostgreSQL serving state.
+- **Unit of Work** for one-series ingestion durability, Gold publication commit boundaries, and transactional PostgreSQL deltas.
 - **State Machine** for Gold publication: `building -> complete|failed`.
 - **Materialized View** for root Gold JSON/PNG, derived from authoritative `manifest.parquet`.
 - **Mark-and-Sweep** for safe Gold retention: make a build unselectable before deleting physical files.
@@ -92,30 +95,13 @@ request_end        = injected_today
 
 Default `overlap_days = 7` calendar days so recent source corrections can still replace equal-key observations. The normal `update` command and `run-daily` **never automatically switch to full-history reconciliation**.
 
-Example:
+For `date_range` providers, the network request must use those exact bounds. For `full_file` providers such as catalogued CBOE/STOXX sources, the complete remote object may have to be downloaded, but the adapter restricts the logical update/diff to the requested delta window before persistence. Normal execution therefore rewrites only inserted/revised delta rows and affected monthly partitions.
 
-```text
-Bronze min date:       2000-01-03
-Bronze latest date:    2026-08-18
-injected today:        2026-08-19
-overlap:               7 days
-
-normal request window: 2026-08-11 .. 2026-08-19
-```
-
-The request must **not** start from `2000-01-03`. The oldest retained date is irrelevant to normal delta planning.
-
-For `date_range` providers, the network request must use those exact bounds. Providers may not silently expand a normal update into a maximum-history query.
-
-For `full_file` providers such as the catalogued CBOE/STOXX sources, the public source may only expose a complete file. In that case the complete remote object may have to be downloaded, but the adapter must restrict the logical update/diff to the requested delta window before persistence. Consequently, normal execution still rewrites only inserted/revised delta rows and affected monthly partitions. The project must not claim network-level delta retrieval where the upstream source does not support it.
-
-A provider response outside the normal logical window must not enlarge the accepted update scope. For bounded providers, out-of-window rows are an adapter/contract error; for full-file providers, out-of-window rows are ignored for the normal delta diff.
+A shorter upstream response is never interpreted as permission to delete older retained history. Equal-key observations may be revised. Explicit deletion semantics require an explicit provider contract and are not inferred from omission.
 
 ### Explicit reconciliation
 
 `reconcile` is a separate explicit command. It may request maximum currently exposed history to detect older revisions outside the overlap window. It is **not invoked automatically by `run-daily`**. If operators want periodic reconciliation, they schedule the explicit `reconcile` command separately.
-
-A shorter upstream response is never interpreted as permission to delete older retained history. Equal-key observations may be revised. Explicit deletion semantics require an explicit provider contract and are not inferred from omission.
 
 ## Medallion Lake
 
@@ -149,20 +135,7 @@ Bronze and Silver use deterministic monthly partitions. Gold is small enough to 
 
 ## Bronze
 
-Bronze preserves provider-shaped observations plus safe ingestion metadata.
-
-Common contract:
-
-```text
-series_id: String
-provider: String
-observation_date: Date
-fetched_at_utc: Datetime(time_zone="UTC")
-source_id: String
-source_url: String
-```
-
-Provider payload is either OHLC (`open/high/low/close`) or scalar (`value`). Natural key:
+Bronze preserves provider-shaped observations plus safe ingestion metadata. Natural key:
 
 ```text
 (provider, series_id, observation_date)
@@ -190,7 +163,7 @@ OHLC sources use `value == close`; scalar sources use `value` and null OHLC fiel
 
 ## Gold
 
-Gold uses the same temporal key convention as `crypto-history-loader`:
+Gold uses the temporal key:
 
 ```text
 timestamp_m1: Datetime(time_unit="us", time_zone="UTC")
@@ -227,11 +200,7 @@ versions/build_id=<YYYYMMDDTHHMMSSZ>/
   feature_profile.png
 ```
 
-`data.parquet` is the canonical full-history Gold frame.
-
-Build `manifest.json` describes the immutable **artifact bundle**, including dataset/build identity, semantic versions, ordered columns, row/timestamp bounds, `data_sha256`, `feature_set_hash`, source Git commit, and plot path. It does **not** own publication lifecycle status; `building|complete|failed` belongs only to the root catalog.
-
-`feature_profile.png` is a deterministic numeric feature-profile plot generated from the exact Gold frame; `timestamp_m1` is excluded.
+`data.parquet` is the canonical full-history Gold frame. Build `manifest.json` records dataset/build identity, semantic versions, ordered columns, row/timestamp bounds, `data_sha256`, `feature_set_hash`, source Git commit, and plot path.
 
 ## Authoritative Gold Catalog
 
@@ -241,47 +210,18 @@ The publication authority is:
 lake/gold/dataset=regime_features_daily/manifest.parquet
 ```
 
-Catalog fields:
-
-```text
-dataset_id
-build_id
-status                    # building | complete | failed
-current
-started_at_utc
-completed_at_utc
-schema_version
-feature_version
-min_timestamp
-max_timestamp
-row_count
-data_path
-build_manifest_path
-plot_path
-pruned_at_utc
-```
-
-Only `manifest.parquet` chooses the current build. Consumers must never use directory order, mtime, or `max(build_id)`.
+Only `manifest.parquet` chooses the current build. Consumers and PostgreSQL synchronization must never use directory order, mtime, or `max(build_id)`.
 
 Consumer resolution is policy-driven:
 
 - `strict_current` is the safe default: current must be compatible/selectable or resolution fails.
-- `latest_compatible` is an explicit resilience policy: when current is incompatible, select the newest compatible complete, non-pruned catalog row.
+- `latest_compatible` is an explicit resilience policy for ordinary local consumers.
 
-Catalog resolution itself is pure and does not inspect the filesystem. Opening the selected immutable bundle performs physical integrity checks.
+PostgreSQL synchronization deliberately uses the strict current compatible build and its explicit immutable `data_path`.
 
 ## Root JSON And Plot Are Materialized Views
 
-The dataset root also exposes:
-
-```text
-manifest.json
-feature_profile.png
-```
-
-These are **rebuildable materialized views** of authoritative `manifest.parquet` and its current build. They do not participate in consumer selection.
-
-This avoids pretending that three independent filesystem replacements can be one atomic transaction. The atomic catalog replacement is the publication commit. Root JSON/PNG are regenerated and verified immediately afterward and reconciled on startup after interruption.
+The dataset root also exposes rebuildable `manifest.json` and `feature_profile.png`. These materialized views do not participate in consumer selection. The atomic catalog replacement is the Gold publication commit.
 
 ## Publication State Machine
 
@@ -308,16 +248,24 @@ A previous current build remains authoritative until the atomic catalog promotio
 
 ## Retention
 
-Default retention keeps five physical successful builds per `(schema_version, feature_version)` pair, including current.
+Default retention keeps five physical successful builds per `(schema_version, feature_version)` pair, including current. Retention first marks a build unselectable in the catalog and only then deletes its immutable physical bundle.
 
-Retention uses mark-and-sweep:
+## PostgreSQL Gold Serving Replica
 
-1. choose an eligible non-current complete build;
-2. atomically mark it unselectable in the catalog by nulling artifact paths and setting `pruned_at_utc`;
-3. delete the immutable physical bundle;
-4. if deletion is interrupted, the remaining files are safe orphans and cleanup retries later.
+PostgreSQL is a serving/research replica, not the canonical data store. The only synchronized dataset is `regime_features_daily`.
 
-The catalog is therefore never left pointing at a partially deleted selectable bundle.
+```text
+canonical source: lake/gold/dataset=regime_features_daily/...
+consumer table:  market_regime.regime_features_daily
+sync state:      market_regime_sync.gold_sync_state
+row digests:     market_regime_sync.gold_row_hashes
+```
+
+`timestamp_m1` is stored as `TIMESTAMPTZ(6)` and the database session is UTC. Feature columns are nullable `DOUBLE PRECISION`. Sync metadata never pollutes the consumer table.
+
+The first successful `gold-sync-postgres` run is necessarily a complete bootstrap because PostgreSQL has no synchronized state. Every later run compares the complete current Gold state against the complete stored row-digest state. This is an **accumulated delta**: if one or more weekly runs were missed, the next run inserts all missing rows, updates historical revisions, deletes stale serving keys, leaves unchanged rows untouched, and advances the synchronized checkpoint atomically.
+
+A semantic `schema_version` or `feature_version` mismatch fails closed; it never triggers a hidden full rewrite. PostgreSQL delete semantics affect only the rebuildable serving replica and do not alter Bronze, Silver, immutable Gold, or source-history retention rules.
 
 ## Operational CLI
 
@@ -336,6 +284,7 @@ update
 reconcile
 silver-build
 gold-build
+gold-sync-postgres
 inventory
 run-daily
 ```
@@ -345,11 +294,6 @@ Global options such as `--lake-root`, `--today`, and `--overlap-days` precede th
 Examples:
 
 ```bash
-# First explicit maximum-history load for selected series.
-uv run market-regime-loader \
-  --lake-root /srv/market-regime/lake \
-  bootstrap --series vix --series us_10y
-
 # Normal bounded source update only.
 uv run market-regime-loader \
   --lake-root /srv/market-regime/lake \
@@ -360,16 +304,23 @@ uv run market-regime-loader \
   --lake-root /srv/market-regime/lake \
   reconcile --series us_10y
 
-# Full operational daily path.
+# Full local Gold publication path.
 uv run market-regime-loader \
   --lake-root /srv/market-regime/lake \
   run-daily
+
+# Synchronize the currently catalog-selected Gold build only.
+uv run market-regime-loader \
+  --lake-root /srv/market-regime/lake \
+  gold-sync-postgres
 
 # Rebuild and print the local inventory.
 uv run market-regime-loader \
   --lake-root /srv/market-regime/lake \
   inventory --json
 ```
+
+`gold-sync-postgres` is intentionally independent of `run-daily`: it does not construct provider clients and does not execute Bronze, Silver, Gold build/publication, mirror, retention, or source reconciliation. This makes a failed database synchronization safely retryable without rebuilding canonical Gold.
 
 ### Daily pipeline contract
 
@@ -379,7 +330,7 @@ uv run market-regime-loader \
 recover interrupted Gold publication/root views
         -> Bronze update (or bootstrap only when that series has no Bronze)
         -> selected Silver rebuild
-        -> full canonical Gold from all 13 available Silver series
+        -> full canonical Gold from all available Silver series
         -> immutable bundle + physical validation
         -> authoritative catalog promotion
         -> root materialized-view refresh
@@ -393,66 +344,58 @@ For existing Bronze the request window is always:
 max(Bronze.observation_date) - overlap_days .. injected today
 ```
 
-With the default overlap this is seven calendar days. `run-daily` has no hidden call path to source `reconcile`, maximum-history loading, or the historical minimum. An explicit `--series` restricts Bronze/Silver work only; Gold remains a full canonical dataset and therefore requires all 13 Silver inputs to exist.
+With the default overlap this is seven calendar days. `run-daily` has no hidden call path to source `reconcile`, maximum-history loading, or the historical minimum.
 
 ### Runtime configuration
 
-Use a **persistent** lake path. A container-local ephemeral path would lose the incremental state and defeat delta planning.
+Use a **persistent** lake path. A container-local ephemeral path would lose incremental state and defeat delta planning.
 
-FRED-backed source commands require:
+FRED-backed source commands require `FRED_API_KEY`. Gold-capable commands (`gold-build`, `run-daily`) record the source Git commit and packaged/deployed environments should set `MARKET_REGIME_GIT_COMMIT` explicitly.
 
-```bash
-export FRED_API_KEY='...'
+PostgreSQL synchronization requires the dedicated repository role and exact endpoint:
+
+```text
+PGHOST=10.10.1.3
+PGPORT=54321
+PGUSER=market-regime-loader
+PGDATABASE=<serving database>
+PGPASSWORD=<repository-specific secret>
 ```
 
-The key is runtime configuration only and is sanitized from structured CLI logs and persisted failure metadata.
+Do not commit these values as a credential string. Deployment configuration lives in ignored `config.yaml`. `scripts/export_cron_config.py config.yaml` validates the exact host, port, and role and exports shell-safe `PG*`, lake, project, mirror, FRED, and logging variables. The repository password must be distinct from the PostgreSQL administrator password.
 
-Gold-capable commands (`gold-build`, `run-daily`) record the source Git commit in each immutable build manifest. In a Git checkout the CLI resolves `git rev-parse HEAD`; packaged/deployed environments should set explicitly:
+The canonical main log is enforced as:
 
-```bash
-export MARKET_REGIME_GIT_COMMIT='<40-or-64-character-lowercase-hex-commit>'
+```text
+${PROJECT_ROOT}/.logs/market-regime-loader.log
 ```
 
-The optional testing/debugging flag `--today YYYY-MM-DD` injects the planning date deterministically. Production scheduling normally omits it.
-
-To mirror every successfully published Gold dataset to another mounted volume, set:
-
-```bash
-export MARKET_REGIME_GOLD_MIRROR_ROOT=/volume1/Temp/gold
-```
-
-The mirror uses `rsync -aH --delete-delay --partial` only after catalog promotion and root-view refresh. A mirror failure does not roll back the authoritative Gold catalog; the next publication retries it.
+The optional Gold mirror still runs only as part of local publication; a PostgreSQL sync failure does not roll back the authoritative Gold catalog.
 
 ### Scheduling
 
-The data lake is intended to run on the deployment host/NAS, not as scheduled GitHub Actions ingestion. The checked-in crontab template schedules the delta-only update every **Saturday at 10:00 in the deployment host's local time zone**:
+The data lake is intended to run on the deployment host/NAS, not as scheduled GitHub Actions ingestion. The checked-in crontab template runs every **Sunday at 10:00 in the deployment host's local time zone**. It loads protected configuration, creates the project log directory, publishes local Gold, and only after a successful `run-daily` synchronizes PostgreSQL:
 
 ```cron
-0 10 * * 6 cd /srv/market-regime-loader && /usr/local/bin/uv run market-regime-loader --lake-root /srv/market-regime/lake run-daily >> /var/log/market-regime-loader.log 2>&1
+0 10 * * 0 cd /srv/market-regime-loader && eval "$(/usr/local/bin/uv run python scripts/export_cron_config.py config.yaml)" && mkdir -p "$PROJECT_ROOT/.logs" && { /usr/local/bin/uv run market-regime-loader --lake-root "$LAKE_ROOT" run-daily && /usr/local/bin/uv run market-regime-loader --lake-root "$LAKE_ROOT" gold-sync-postgres; } >> "$LOG_PATH" 2>&1
 ```
 
-Install it for the service account after reviewing the absolute paths for that host:
+Install it for the service account after reviewing the absolute project path:
 
 ```bash
 crontab ops/market-regime-loader.cron
 ```
 
-The cron command is intentionally only `run-daily`, so it preserves the normal bounded delta-update contract and never performs an implicit source reconciliation.
+Operational semantics are explicit:
 
-Equivalent systemd service command:
+- `run-daily` failure prevents PostgreSQL synchronization;
+- `gold-sync-postgres` failure makes the cron job non-zero but does **not** roll back or invalidate the already published local Gold build;
+- after a database-only failure, retry only `uv run market-regime-loader --lake-root "$LAKE_ROOT" gold-sync-postgres` rather than rerunning source ingestion;
+- the first successful database synchronization is complete; subsequent synchronizations are accumulated deltas and catch up any missed weekly runs;
+- source maximum-history reconciliation remains a separate explicit schedule/command and is never part of the Sunday main chain;
+- both main commands append stdout/stderr to the same `${PROJECT_ROOT}/.logs/market-regime-loader.log` through `LOG_PATH`.
 
-```text
-WorkingDirectory=/srv/market-regime-loader
-ExecStart=/usr/local/bin/uv run market-regime-loader --lake-root /srv/market-regime/lake run-daily
-```
-
-If periodic maximum-history reconciliation is desired, schedule it **separately** and less frequently, for example weekly:
-
-```cron
-30 3 * * 0 cd /srv/market-regime-loader && /usr/local/bin/uv run market-regime-loader --lake-root /srv/market-regime/lake reconcile >> /var/log/market-regime-reconcile.log 2>&1
-```
-
-Keeping these schedules separate makes the normal daily delta guarantee observable and testable.
+If periodic maximum-history source reconciliation is desired, schedule `reconcile` separately and less frequently. Keeping source reconciliation separate makes the normal bounded source-update contract observable and testable.
 
 ## Quality Gates
 
@@ -474,26 +417,25 @@ coverage
 
 Live provider tests are marked `network` and are excluded from required gates.
 
-`main` is intended to be protected: no direct pushes, required pull request, required five checks, no force push/delete, squash merge, and repository auto-merge. Implementation PRs enable auto-merge so GitHub merges them only after all required merge-gate conditions pass.
-
 ## Repository Structure
 
 ```text
 api/                 CLI adapters only
 application/         use cases, contracts, policies, ports
 application/ports/   provider/persistence/clock/sleeper interfaces
-ingestion/           provider + filesystem adapters
+ingestion/           provider + filesystem/PostgreSQL adapters
 scripts/             operational wrappers and repo tooling
 tests/unit/          deterministic unit tests
 tests/integration/   offline component/E2E tests
 tests/fixtures/      committed small fixtures
 lake/                ignored runtime data
 AGENTS.md             coding-agent rules
-BACKLOG.md            implementation source of truth
+BACKLOG.md            core implementation backlog
+BACKLOG_POSTGRES.md   PostgreSQL serving extension backlog
 ARCHITECTURE.md       durable engineering contract
 README.md             operator/consumer contract
 ```
 
 ## Documentation Contract
 
-`BACKLOG.md`, `ARCHITECTURE.md`, `README.md`, and `AGENTS.md` must not intentionally contradict one another. A PR that changes a documented contract updates the relevant sidecars in the same PR.
+`BACKLOG.md`, `BACKLOG_POSTGRES.md`, `ARCHITECTURE.md`, `README.md`, and `AGENTS.md` must not intentionally contradict one another. A PR that changes a documented contract updates the relevant sidecars in the same PR.
