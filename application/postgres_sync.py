@@ -50,7 +50,9 @@ class GoldRowDigest:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "timestamp_m1", _utc(self.timestamp_m1))
-        if len(self.row_sha256) != 64 or any(char not in "0123456789abcdef" for char in self.row_sha256):
+        if len(self.row_sha256) != 64 or any(
+            char not in "0123456789abcdef" for char in self.row_sha256
+        ):
             raise ValueError("row_sha256 must be 64 lowercase hexadecimal characters")
 
 
@@ -110,7 +112,9 @@ class GoldSyncState:
     def __post_init__(self) -> None:
         if self.dataset_id != POSTGRES_DATASET_ID:
             raise ValueError("unsupported PostgreSQL Gold dataset_id")
-        if len(self.data_sha256) != 64 or any(char not in "0123456789abcdef" for char in self.data_sha256):
+        if len(self.data_sha256) != 64 or any(
+            char not in "0123456789abcdef" for char in self.data_sha256
+        ):
             raise ValueError("data_sha256 must be 64 lowercase hexadecimal characters")
         if self.row_count < 0:
             raise ValueError("row_count cannot be negative")
@@ -119,7 +123,9 @@ class GoldSyncState:
             object.__setattr__(self, "min_timestamp", _utc(self.min_timestamp))
         if self.max_timestamp is not None:
             object.__setattr__(self, "max_timestamp", _utc(self.max_timestamp))
-        if self.row_count == 0 and (self.min_timestamp is not None or self.max_timestamp is not None):
+        if self.row_count == 0 and (
+            self.min_timestamp is not None or self.max_timestamp is not None
+        ):
             raise ValueError("empty synchronized dataset cannot have timestamp bounds")
         if self.row_count > 0 and (self.min_timestamp is None or self.max_timestamp is None):
             raise ValueError("non-empty synchronized dataset requires timestamp bounds")
