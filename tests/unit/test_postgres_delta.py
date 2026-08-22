@@ -27,9 +27,7 @@ def _frame(days: tuple[int, ...], *, offset: float = 0.0) -> pl.DataFrame:
     data: dict[str, list[object]] = {"timestamp_m1": [_ts(day) for day in days]}
     for index, column in enumerate(GOLD_COLUMNS[1:], start=1):
         data[column] = [float(day + index) + offset for day in days]
-    return pl.DataFrame(data).with_columns(
-        pl.col("timestamp_m1").cast(pl.Datetime("us", "UTC"))
-    )
+    return pl.DataFrame(data).with_columns(pl.col("timestamp_m1").cast(pl.Datetime("us", "UTC")))
 
 
 def _state(frame: pl.DataFrame) -> GoldSyncState:
@@ -78,7 +76,7 @@ def test_complete_empty_target_is_full_bootstrap() -> None:
     frame = _frame((1, 2, 3))
     plan = plan_gold_delta(frame, (), None)
     assert [row.timestamp_m1 for row in plan.inserts] == [_ts(1), _ts(2), _ts(3)]
-    assert (plan.updated, plan.deletes, plan.unchanged) == ((), (), ())
+    assert (plan.updates, plan.deletes, plan.unchanged) == ((), (), ())
     assert len(plan.source_digests) == 3
 
 
