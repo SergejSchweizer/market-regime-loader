@@ -266,7 +266,9 @@ class PostgresGoldSyncRepository:
                 cursor.close()
             return connection
         except Exception:
-            raise PostgresGoldRepositoryError("PostgreSQL connection initialization failed") from None
+            raise PostgresGoldRepositoryError(
+                "PostgreSQL connection initialization failed"
+            ) from None
 
     def ensure_schema(self) -> None:
         connection = self._open()
@@ -281,7 +283,9 @@ class PostgresGoldSyncRepository:
             connection.commit()
         except Exception:
             connection.rollback()
-            raise PostgresGoldRepositoryError("PostgreSQL Gold schema initialization failed") from None
+            raise PostgresGoldRepositoryError(
+                "PostgreSQL Gold schema initialization failed"
+            ) from None
         finally:
             connection.close()
 
