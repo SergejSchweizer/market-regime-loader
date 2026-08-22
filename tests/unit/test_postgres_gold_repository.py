@@ -36,7 +36,9 @@ def _row(day: int, value: float) -> GoldRowPayload:
     return GoldRowPayload(_ts(day), tuple(value for _ in GOLD_COLUMNS[1:]))
 
 
-def _state(*, count: int = 2, minimum: datetime | None = None, maximum: datetime | None = None) -> GoldSyncState:
+def _state(
+    *, count: int = 2, minimum: datetime | None = None, maximum: datetime | None = None
+) -> GoldSyncState:
     if minimum is None and count:
         minimum = _ts(1)
     if maximum is None and count:
@@ -196,15 +198,15 @@ def test_read_state_round_trips_exact_sync_metadata() -> None:
 
 
 def test_read_digests_fetches_only_timestamp_and_hash_in_order() -> None:
-    connection = FakeConnection(
-        digest_rows=((_ts(1), "a" * 64), (_ts(2), "b" * 64))
-    )
+    connection = FakeConnection(digest_rows=((_ts(1), "a" * 64), (_ts(2), "b" * 64)))
     repository = PostgresGoldSyncRepository(_config(), connection_factory=Factory(connection))
     assert repository.read_digests(POSTGRES_DATASET_ID) == (
         GoldRowDigest(_ts(1), "a" * 64),
         GoldRowDigest(_ts(2), "b" * 64),
     )
-    digest_query = next(query for query in _execute_queries(connection) if query.startswith("SELECT timestamp"))
+    digest_query = next(
+        query for query in _execute_queries(connection) if query.startswith("SELECT timestamp")
+    )
     assert "row_sha256" in digest_query
     for feature in GOLD_COLUMNS[1:]:
         assert feature not in digest_query
@@ -232,11 +234,21 @@ def test_apply_delta_is_locked_exact_and_state_is_last_before_commit() -> None:
 
     queries = _execute_queries(connection)
     lock_index = next(i for i, query in enumerate(queries) if "pg_advisory_xact_lock" in query)
-    insert_index = next(i for i, query in enumerate(queries) if query.startswith("INSERT INTO \"market_regime\""))
-    update_index = next(i for i, query in enumerate(queries) if query.startswith("UPDATE \"market_regime\""))
-    delete_index = next(i for i, query in enumerate(queries) if query.startswith("DELETE FROM \"market_regime\""))
+    insert_index = next(
+        i for i, query in enumerate(queries) if query.startswith('INSERT INTO "market_regime"')
+    )
+    update_index = next(
+        i for i, query in enumerate(queries) if query.startswith('UPDATE "market_regime"')
+    )
+    delete_index = next(
+        i for i, query in enumerate(queries) if query.startswith('DELETE FROM "market_regime"')
+    )
     summary_index = next(i for i, query in enumerate(queries) if query.startswith("SELECT COUNT"))
-    state_index = next(i for i, query in enumerate(queries) if 'INSERT INTO "market_regime_sync"."gold_sync_state"' in query)
+    state_index = next(
+        i
+        for i, query in enumerate(queries)
+        if 'INSERT INTO "market_regime_sync"."gold_sync_state"' in query
+    )
     assert lock_index < insert_index < update_index < delete_index < summary_index < state_index
     assert queries.count(module._INSERT_ROW_SQL) == 1
     assert queries.count(module._UPDATE_ROW_SQL) == 1
@@ -289,7 +301,9 @@ def test_post_write_verification_failure_rolls_back_before_state_write() -> None
     with pytest.raises(PostgresGoldRepositoryError):
         repository.apply_delta(POSTGRES_DATASET_ID, GoldDeltaPlan((), (), (), (), ()), _state())
     queries = _execute_queries(connection)
-    assert not any('INSERT INTO "market_regime_sync"."gold_sync_state"' in query for query in queries)
+    assert not any(
+        'INSERT INTO "market_regime_sync"."gold_sync_state"' in query for query in queries
+    )
     assert ("rollback", None, None) in connection.events
 
 
